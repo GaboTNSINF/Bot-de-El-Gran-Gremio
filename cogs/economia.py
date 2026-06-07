@@ -95,6 +95,74 @@ class EconomiaCog(commands.Cog):
     # 👑 COMANDO SUPREMO: EMISIÓN DE FONDOS DESDE LA RESERVA (SUELDOS/SUBSIDIOS)
     # =========================================================================
 
+    @commands.slash_command(name="emitir_nominas", description="[SUPREME] Emite los sueldos de todo el personal gremial registrado en nómina de forma masiva.")
+    async def emitir_nominas(self, ctx: discord.ApplicationContext):
+        if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
+            await ctx.respond("❌ **Acceso Denegado:** Solo los Fundadores pueden ejecutar el pago de nóminas masivo.", ephemeral=True)
+            return
+
+        # NOTA EDUCATIVA: Retrasamos la respuesta porque esta operación es "pesada"
+        # (va a leer toda la base de datos de personal y ejecutar decenas de updates).
+        await ctx.response.defer(ephemeral=False)
+
+        # Matriz de Sueldos Semanales (En piezas de cobre brutas para inyección directa)
+        # Puedes balancear estos montos a futuro. Ej: 50000 pc = 50 po.
+        escala_salarial = {
+            "supervisor": 50000,
+            "oficial": 40000,
+            "experto": 30000,
+            "trabajador": 20000,
+            "aprendiz": 10000,
+            "guardia": 20000,
+            "recluta": 10000,
+            "erudito": 30000,
+            "dibujante": 20000,
+            "constructor": 20000,
+            "cronista": 30000,
+            "periodista": 20000,
+            "locutor": 20000
+        }
+
+        total_empleados_pagados = 0
+        total_gasto_pc = 0
+
+        # Recuperar y pagar a todos por cada rama registrada en el bot
+        for key_rama in config.CONFIG_RAMAS.keys():
+            personal_rama = await database.obtener_personal_division(key_rama)
+            if not personal_rama:
+                continue
+
+            for empleado in personal_rama:
+                user_id = empleado["user_id"]
+                rango = empleado["rango_interno"].lower()
+                sueldo_asignado = escala_salarial.get(rango, 10000) # 10po base si el rango no está en la escala
+
+                # Emitimos los fondos atómicamente desde la Bóveda hacia el empleado
+                exito = await database.emitir_fondos_reserva(user_id, sueldo_asignado)
+
+                if exito:
+                    total_empleados_pagados += 1
+                    total_gasto_pc += sueldo_asignado
+                else:
+                    await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda se quedó sin fondos intentando pagar a <@{user_id}>. Proceso de nómina abortado a la mitad.")
+                    return
+
+        # Reporte final
+        if total_empleados_pagados == 0:
+            await ctx.followup.send("📝 **Nómina vacía:** No hay personal registrado en los libros del Gremio para cobrar sueldo.")
+            return
+
+        embed = discord.Embed(
+            title="🏦 INFORME DE TESORERÍA: NÓMINAS EMITIDAS",
+            description=f"El Fundador {ctx.user.mention} ha ordenado la dispersión de fondos para todo el personal operativo.",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="👥 Personal Remunerado", value=f"`{total_empleados_pagados}` trabajadores", inline=True)
+        embed.add_field(name="💸 Gasto Total Gremial", value=f"`{total_gasto_pc:,} pc` deducidos de la Bóveda", inline=True)
+        embed.set_footer(text="Los sueldos ya han sido depositados en las cuentas corrientes de los jugadores.")
+
+        await ctx.followup.send(embed=embed)
+
     @commands.slash_command(name="banco_emitir", description="[SUPREME] Inyecta fondos a un usuario desde la Bóveda Central.")
     async def banco_emitir(
         self,
