@@ -4,3 +4,7 @@
 ## 2024-06-07 - Missing indexes for ORDER BY clauses
 **Learning:** SQLite requires creating an expensive temporary B-tree (`USE TEMP B-TREE FOR ORDER BY`) and performing a full table scan when sorting rows via `ORDER BY` if there is no covering index matching the sort order. In `database.py`, `obtener_ladder_aventureros()` sorts the entire `aventureros` table by `nivel DESC, sesiones_jugadas DESC` to get the top 10 players. As the player base grows, this query becomes a bottleneck.
 **Action:** Create composite indexes for columns frequently used together in `ORDER BY` and `LIMIT` clauses to allow the database engine to perform an O(1) index scan (`SCAN ... USING INDEX`) instead of full table file sorts.
+
+## 2024-06-07 - discord.py/pycord get_member_named performance
+**Learning:** The `guild.get_member_named(name)` method in `discord.py` / `pycord` is not an $O(1)$ Hash Map lookup. It actually performs a linear scan $O(N)$ across all members in the guild cache. If this method is used in a loop over user inputs (like parsing a list of player names), the complexity becomes $O(N \cdot M)$ where N is the guild size and M is the number of inputs. This causes severe CPU freezing for large guilds if multiple names are not found or typed incorrectly.
+**Action:** When needing to look up multiple members by name/nickname from user string inputs, construct a local hash map index (`{m.name.lower(): m for m in guild.members}`) in a single $O(N)$ pass. Then perform all string lookups against this local dictionary in $O(1)$ time per input.

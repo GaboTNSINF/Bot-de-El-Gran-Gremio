@@ -101,7 +101,11 @@ class FormularioReporteSesion(discord.ui.Modal):
         miembros_detectados = []
         menciones_texto = []
         
-        # PROCESAMIENTO OPTIMIZADO EXCLUSIVO: Eliminación completa de búsquedas difusas lineales destructivas de CPU
+        # PROCESAMIENTO OPTIMIZADO EXCLUSIVO: Indexación O(N) local para búsquedas O(1)
+        # Reemplazamos guild.get_member_named() (que en pycord hace un escaneo lineal O(N) oculto por cada jugador)
+        # por un mapa local de hash generado en una sola pasada. (Optimización de Bolt ⚡)
+        mapa_miembros = None
+
         for p_name in jugadores_raw:
             p_name = p_name.strip()
             if not p_name: 
@@ -112,9 +116,17 @@ class FormularioReporteSesion(discord.ui.Modal):
             if p_name.isdigit():
                 member = guild.get_member(int(p_name))
             
-            # Intento de resolución 2: Nombre de usuario exacto o apodo indexado (Complejidad O(1) mediante Hash Map nativo)
+            # Intento de resolución 2: Búsqueda O(1) nativa local
             if not member:
-                member = guild.get_member_named(p_name)
+                if mapa_miembros is None:
+                    # Lazy loading: Solo construimos el índice O(N) si alguien usa un nombre en lugar de ID
+                    mapa_miembros = {}
+                    for m in guild.members:
+                        mapa_miembros[m.name.lower()] = m
+                        if m.nick:
+                            mapa_miembros[m.nick.lower()] = m
+
+                member = mapa_miembros.get(p_name.lower())
 
             if member:
                 miembros_detectados.append(member)
