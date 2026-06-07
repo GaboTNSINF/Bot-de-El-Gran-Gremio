@@ -5,8 +5,8 @@ from discord.ext import commands
 import config
 import database
 
-# ID del canal general donde el bot pregonará los movimientos de personal
-CANAL_GENERAL_ID = 1510033477477728316
+# ID del canal de logs donde el bot registrará la auditoría de personal
+CANAL_LOGS_ID = 1513250885730570442
 
 class PersonalCog(commands.Cog):
     def __init__(self, bot):
@@ -174,15 +174,17 @@ class PersonalCog(commands.Cog):
         await ctx.respond(f"💼 Registro de contratación completado para {usuario.name} en la rama `{key_rama.upper()}`.", ephemeral=True)
         await self._actualizar_embed_visual(ctx.guild, key_rama)
 
-        canal_general = ctx.guild.get_channel(CANAL_GENERAL_ID)
-        if canal_general:
-            embed_pub = discord.Embed(
-                title="💼 NUEVO CONTRATO GREMIAL",
-                description=f"¡Atención, comunidad! {usuario.mention} ha sido formalmente reclutado y asume las funciones de **{rango.capitalize()}** en la sección de {rama_data['titulo']}.",
+        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        if canal_logs:
+            embed_log = discord.Embed(
+                title="📝 AUDITORÍA: NUEVO CONTRATO",
+                description=f"**Sujeto:** {usuario.mention}\n"
+                            f"**Rango Otorgado:** {rango.capitalize()}\n"
+                            f"**Sección:** {rama_data['titulo']}",
                 color=rama_data["color"]
             )
-            embed_pub.set_footer(text=f"Orden firmada por: {ctx.user.name}")
-            await canal_general.send(embed=embed_pub)
+            embed_log.set_footer(text=f"Orden autorizada por: {ctx.user.name}")
+            await canal_logs.send(embed=embed_log)
 
     @commands.slash_command(name="despedir", description="[STAFF] Pone fin al contrato de un lacayo.")
     async def despedir(
@@ -221,14 +223,16 @@ class PersonalCog(commands.Cog):
         await ctx.respond(f"🧹 Has despedido a {usuario.name} de la división `{key_rama.upper()}`.", ephemeral=True)
         await self._actualizar_embed_visual(ctx.guild, key_rama)
 
-        canal_general = ctx.guild.get_channel(CANAL_GENERAL_ID)
-        if canal_general:
-            embed_pub = discord.Embed(
-                title="🪓 RESCISIÓN DE CONTRATO",
-                description=f"Se le notifica a la comunidad que {usuario.mention} ha dejado de prestar servicios operativos en la sección de {rama_data['titulo']}.",
-                color=discord.Color.red()
+        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        if canal_logs:
+            embed_log = discord.Embed(
+                title="🪓 AUDITORÍA: RESCISIÓN DE CONTRATO",
+                description=f"**Sujeto Expulsado:** {usuario.mention}\n"
+                            f"**Sección:** {rama_data['titulo']}",
+                color=discord.Color.dark_red()
             )
-            await canal_general.send(embed=embed_pub)
+            embed_log.set_footer(text=f"Rescisión ejecutada por: {ctx.user.name}")
+            await canal_logs.send(embed=embed_log)
 
     @commands.slash_command(name="promote", description="[STAFF] Asciende a un trabajador de rango.")
     async def promote(
@@ -271,14 +275,17 @@ class PersonalCog(commands.Cog):
         await ctx.respond(f"⭐ Ascenso aplicado a {usuario.name}.", ephemeral=True)
         await self._actualizar_embed_visual(ctx.guild, key_rama)
 
-        canal_general = ctx.guild.get_channel(CANAL_GENERAL_ID)
-        if canal_general:
-            embed_pub = discord.Embed(
-                title="⭐ ASCENSO ADMINISTRATIVO",
-                description=f"Por orden superior de la sección {rama_data['titulo']}, el miembro {usuario.mention} ha sido promovido al rango oficial de **{nuevo_rango.capitalize()}**.",
-                color=discord.Color.green()
+        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        if canal_logs:
+            embed_log = discord.Embed(
+                title="⭐ AUDITORÍA: ASCENSO",
+                description=f"**Sujeto Promovido:** {usuario.mention}\n"
+                            f"**Nuevo Rango:** {nuevo_rango.capitalize()}\n"
+                            f"**Sección:** {rama_data['titulo']}",
+                color=discord.Color.dark_green()
             )
-            await canal_general.send(embed=embed_pub)
+            embed_log.set_footer(text=f"Promoción firmada por: {ctx.user.name}")
+            await canal_logs.send(embed=embed_log)
 
     @commands.slash_command(name="demote", description="[STAFF] Degrada a un trabajador.")
     async def demote(
@@ -321,14 +328,17 @@ class PersonalCog(commands.Cog):
         await ctx.respond(f"🔻 Degradación aplicada a {usuario.name}.", ephemeral=True)
         await self._actualizar_embed_visual(ctx.guild, key_rama)
 
-        canal_general = ctx.guild.get_channel(CANAL_GENERAL_ID)
-        if canal_general:
-            embed_pub = discord.Embed(
-                title="🔻 REESTRUCTURACIÓN DE RANGO",
-                description=f"Se informa que dentro de la sección de {rama_data['titulo']}, el miembro {usuario.mention} ha sido reasignado al rango de **{nuevo_rango.capitalize()}**.",
+        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        if canal_logs:
+            embed_log = discord.Embed(
+                title="🔻 AUDITORÍA: DEGRADACIÓN",
+                description=f"**Sujeto Reasignado:** {usuario.mention}\n"
+                            f"**Nuevo Rango (Inferior):** {nuevo_rango.capitalize()}\n"
+                            f"**Sección:** {rama_data['titulo']}",
                 color=discord.Color.orange()
             )
-            await canal_general.send(embed=embed_pub)
+            embed_log.set_footer(text=f"Degradación firmada por: {ctx.user.name}")
+            await canal_logs.send(embed=embed_log)
 
 def setup(bot):
     bot.add_cog(PersonalCog(bot))
