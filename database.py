@@ -9,15 +9,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "gremio.db")
 
 # Tubería de conexión global persistente en memoria RAM para evitar bloqueos de disco
+# NOTA EDUCATIVA: Usamos una conexión persistente para no estar abriendo y cerrando
+# el archivo de la base de datos en cada comando, lo que en un VPS causaría lentitud y errores.
 _connection = None
 
 async def init_db():
     """Inicializa el pool de conexiones persistentes y forja las tablas del reino."""
     global _connection
+    # NOTA EDUCATIVA: Solo nos conectamos si no hay una conexión activa, esto previene
+    # sobrescribir la conexión y dejar "conexiones fantasma" que bloquean la base de datos (Database is locked).
     if _connection is None:
         _connection = await aiosqlite.connect(DB_PATH)
         # Habilitar soporte para llaves foráneas y optimizaciones de velocidad en SQLite
         await _connection.execute("PRAGMA foreign_keys = ON")
+        # NOTA EDUCATIVA: El modo WAL (Write-Ahead Logging) permite que SQLite lea y escriba
+        # al mismo tiempo. Es FUNDAMENTAL para un bot de Discord asíncrono para que no se congele.
         await _connection.execute("PRAGMA journal_mode = WAL")
         # Cambiar el formato de retorno a diccionarios por defecto para evitar errores de índice
         _connection.row_factory = aiosqlite.Row
@@ -284,12 +290,22 @@ async def obtener_candidatos_compatibles_dm(dm_id: int, limite_jugadores: int):
 
     # 2. Consulta de filtrado industrial mediante álgebra relacional en SQLite
     # Determina la coincidencia horaria (intersección >= 180 minutos) en una sola pasada de disco
+    # BLINDAJE: Consideramos los ciclos cruzados de la medianoche (ej: un turno que empieza a las 22:00 y acaba a las 02:00).
+    # Si fin < inicio, le sumamos 24h (1440 mins) tanto en Python como en SQL.
+    if dm_fin <= dm_ini:
+        dm_fin += 1440
+
     query = """
         SELECT m.user_id, a.nivel, m.hora_inicio_utc, m.hora_fin_utc
         FROM matchmaking m
         JOIN aventureros a ON m.user_id = a.user_id
         WHERE m.rol_busqueda = 'jugador'
-          AND (MIN(m.hora_fin_utc, ?) - MAX(m.hora_inicio_utc, ?)) >= 180
+          AND (
+              -- Calculamos la intersección de horas sumando 1440 minutos si cruzan la medianoche
+              MIN(CASE WHEN m.hora_fin_utc <= m.hora_inicio_utc THEN m.hora_fin_utc + 1440 ELSE m.hora_fin_utc END, ?)
+              -
+              MAX(m.hora_inicio_utc, ?)
+          ) >= 180
     """
     
     async with _connection.execute(query, (dm_fin, dm_ini)) as cursor:
@@ -309,12 +325,17 @@ async def inyectar_fondos_ignorados(dm_id: int, nombre_dm: str, valor: int, labe
 
 async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) -> bool:
     """Ejecuta una transferencia bancaria P2P atómica puramente controlada por el motor de SQLite."""
+    # BLINDAJE EXTRA: Evitamos que una persona pueda enviarse dinero negativo para sumar saldo mágicamente a su cuenta.
+    if cantidad_pc <= 0:
+        return False
+
     # 1. Forzar la existencia del registro contable del receptor para evitar violaciones de nulidad
     await _connection.execute("INSERT OR IGNORE INTO cuentas_bancarias (id_entidad, balance_pc) VALUES (?, 0)", (receptor_id,))
     await _connection.execute("INSERT OR IGNORE INTO cuentas_bancarias (id_entidad, balance_pc) VALUES (?, 0)", (emisor_id,))
     
     # 2. Intentar la deducción de los fondos condicionada directamente en el WHERE
-    # Esto blinda el sistema contra Race Conditions: si no hay fondos suficientes, rowcount será 0.
+    # Esto blinda el sistema contra Race Conditions (Dos retiros exactamente al mismo tiempo):
+    # Si no hay fondos suficientes para cubrir 'cantidad_pc', SQLite aborta la escritura y rowcount será 0.
     async with _connection.execute(
         "UPDATE cuentas_bancarias SET balance_pc = balance_pc - ? WHERE id_entidad = ? AND balance_pc >= ?",
         (cantidad_pc, emisor_id, cantidad_pc)

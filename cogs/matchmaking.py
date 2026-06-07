@@ -209,7 +209,14 @@ class MatchmakingCog(commands.Cog):
         # grupo_candidato: [(j_id, j_nivel, j_inicio, j_fin), ...]
         niveles = [jugador[1] for jugador in grupo_candidato]
         
+        # BLINDAJE MATCHMAKING: Si por algún motivo la lista de niveles está vacía, max() y min() lanzarán un error ValueError
+        # y crashearán todo el bot. Añadimos un chequeo de seguridad rápido.
+        if not niveles:
+            return False
+
         # REGLA 1: Aislamiento estricto del Bloque de Aprendizaje (Nivel 1 y 2)
+        # NOTA EDUCATIVA: Usamos iteradores (any y all) porque son mucho más rápidos en memoria
+        # que recorrer la lista entera con un for clásico si encontramos un true temprano (short-circuit).
         if any(n in [1, 2] for n in niveles):
             return all(n in [1, 2] for n in niveles)
             
@@ -225,7 +232,9 @@ class MatchmakingCog(commands.Cog):
             dm_id = dm["user_id"]
             quorum_objetivo = int(dm["tier_juego"]) if dm["tier_juego"].isdigit() else 4
             
-            # EJECUCIÓN INDUSTRIAL: SQLite hace todo el trabajo de tiempo; Python recibe datos limpios [cite: 1, 2, 3]
+            # EJECUCIÓN INDUSTRIAL: SQLite hace todo el trabajo de tiempo; Python recibe datos limpios
+            # NOTA EDUCATIVA: En la refactorización de database.py, blindamos que la query entienda los "cruces de medianoche".
+            # Eso evita que un jugador que juega de 22:00 a 02:00 se filtre incorrectamente.
             candidatos = await database.obtener_candidatos_compatibles_dm(dm_id, quorum_objetivo)
             
             if len(candidatos) < quorum_objetivo:
