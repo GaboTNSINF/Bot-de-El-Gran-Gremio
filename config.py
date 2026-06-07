@@ -31,11 +31,8 @@ ROLES_CREACION_NOMINAS = [
 ]
 
 # Rangos autorizados para aprobar fichas nuevas (/aprobar_ficha)
-# Según el Manifiesto: "Toda la división de la rama Gremial tiene la obligación de procesar y resolver admisiones en el chat."
+# Solo de Oficial para arriba tienen la autoridad de sellar las fichas en la Base de Datos.
 ROLES_APROBACION = [
-    1509955206610419914,  # ID Rol Aprendiz Gremial
-    1509955203103723610,  # ID Rol Trabajador Gremial
-    1509955118060142865,  # ID Rol Experto Gremial
     1509954923914203359,  # ID Rol Oficial Gremial
     1509954827822825604,  # ID Rol Supervisor Gremial
     1509954655470485645,  # ID Rol Jefe Gremial
@@ -61,7 +58,17 @@ ROLES_EDICION_MATRICULA = [
 ]
 
 # Incluye alta gerencia, oficiales y todo el escalafón operativo de la rama Gremial para atender Admisiones
-ROLES_ACCESO_ADMISION = ROLES_APROBACION.copy()
+# "Toda la división de la rama Gremial tiene la obligación de procesar y resolver admisiones en el chat."
+ROLES_ACCESO_ADMISION = [
+    1509955206610419914,  # ID Rol Aprendiz Gremial
+    1509955203103723610,  # ID Rol Trabajador Gremial
+    1509955118060142865,  # ID Rol Experto Gremial
+    1509954923914203359,  # ID Rol Oficial Gremial
+    1509954827822825604,  # ID Rol Supervisor Gremial
+    1509954655470485645,  # ID Rol Jefe Gremial
+    1509954249436696758,  # ID Rol Co-Fundador
+    1509952429586780332   # ID Rol Fundador
+]
 
 # --- PATROCINADORES ---
 ROL_PATROCINADOR = 1512293128986689606
