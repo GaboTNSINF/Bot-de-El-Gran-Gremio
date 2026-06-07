@@ -210,12 +210,9 @@ class PersonalCog(commands.Cog):
 
         rama_data = config.CONFIG_RAMAS[key_rama]
         
-        # OPTIMIZACIÓN SENIOR: Consolidación de remoción de roles en una única llamada API atómica
-        roles_a_remover = []
-        for id_rol in rama_data["rangos"].values():
-            rol = ctx.guild.get_role(id_rol)
-            if rol and rol in usuario.roles: 
-                roles_a_remover.append(rol)
+        # OPTIMIZACIÓN SENIOR (Bolt ⚡): Filtrado O(N) directo sin búsquedas a la caché con get_role()
+        rangos_ids = set(rama_data["rangos"].values())
+        roles_a_remover = [rol for rol in usuario.roles if rol.id in rangos_ids]
                 
         if roles_a_remover:
             await usuario.remove_roles(*roles_a_remover, reason=f"Rescisión de contrato por {ctx.user.name}")
@@ -260,8 +257,9 @@ class PersonalCog(commands.Cog):
             await ctx.respond("❌ Rango inválido.", ephemeral=True)
             return
 
-        # OPTIMIZACIÓN SENIOR: Limpieza masiva previa a la promoción para evitar duplicados de rango
-        roles_a_remover = [ctx.guild.get_role(rid) for rid in rama_data["rangos"].values() if ctx.guild.get_role(rid) in usuario.roles]
+        # OPTIMIZACIÓN SENIOR (Bolt ⚡): Filtrado O(N) masivo y directo
+        rangos_ids = set(rama_data["rangos"].values())
+        roles_a_remover = [rol for rol in usuario.roles if rol.id in rangos_ids]
         if roles_a_remover:
             await usuario.remove_roles(*roles_a_remover)
 
@@ -309,8 +307,9 @@ class PersonalCog(commands.Cog):
             await ctx.respond("❌ Rango inválido.", ephemeral=True)
             return
 
-        # OPTIMIZACIÓN SENIOR: Limpieza masiva previa a la degradación
-        roles_a_remover = [ctx.guild.get_role(rid) for rid in rama_data["rangos"].values() if ctx.guild.get_role(rid) in usuario.roles]
+        # OPTIMIZACIÓN SENIOR (Bolt ⚡): Filtrado O(N) masivo y directo
+        rangos_ids = set(rama_data["rangos"].values())
+        roles_a_remover = [rol for rol in usuario.roles if rol.id in rangos_ids]
         if roles_a_remover:
             await usuario.remove_roles(*roles_a_remover)
 
