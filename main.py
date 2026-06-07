@@ -61,7 +61,10 @@ async def ejecutar_bot():
         "cogs.seguridad",
         "cogs.personal",
         "cogs.economia",
-        "cogs.dados" # AGREGAMOS EL NUEVO MÓDULO DE DADOS
+        "cogs.dados", # AGREGAMOS EL NUEVO MÓDULO DE DADOS
+        "cogs.tienda",  # Catálogo interactivo de items
+        "cogs.taberna", # Minijuegos de apuestas con la Casa
+        "cogs.botin"    # Loot tables para DMs
     ]
 
     print("🔌 Cargando módulos del sistema de forma síncrona...")
