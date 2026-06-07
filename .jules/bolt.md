@@ -1,0 +1,3 @@
+## 2024-06-07 - Missing indexes on SQLite foreign keys
+**Learning:** SQLite does not automatically index columns used as foreign keys. In `database.py`, `obtener_ladder_dms()` and `obtener_perfil_dm()` performed large `LEFT JOIN`s on the `reseñas_dms` table using the `dm_id` foreign key. Without an index on `dm_id`, this caused a full table scan (`SCAN r LEFT-JOIN`) on the `reseñas_dms` table for every DM, degrading performance significantly as the number of reviews grew.
+**Action:** Always verify if queries involving `JOIN`s on foreign keys use indexed columns by running `EXPLAIN QUERY PLAN` on complex analytical queries. Create an index (`CREATE INDEX idx_name ON table(column)`) for foreign keys that are frequently used in `JOIN`s or `WHERE` clauses.

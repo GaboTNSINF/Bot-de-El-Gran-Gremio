@@ -79,6 +79,9 @@ async def init_db():
         )
     """)
 
+    # Índice para acelerar las búsquedas por dm_id en reseñas (Optimización de Bolt ⚡)
+    await _connection.execute("CREATE INDEX IF NOT EXISTS idx_resenas_dm_id ON reseñas_dms (dm_id)")
+
     # 5. Tabla de Control de Anclas de Embeds Fijos
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS control_nominas (
