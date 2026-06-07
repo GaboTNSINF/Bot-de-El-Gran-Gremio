@@ -147,5 +147,158 @@ class TabernaCog(commands.Cog):
         )
         await ctx.followup.send(embed=embed, view=BotonesCubilete())
 
+
+    # =========================================================================
+    # 🃏 SECCIÓN: BLACKJACK / VEINTIUNA
+    # =========================================================================
+
+    @commands.slash_command(name="blackjack", description="Juega al clásico 21 contra el Croupier del casino.")
+    async def blackjack(
+        self,
+        ctx: discord.ApplicationContext,
+        moneda: discord.Option(str, "Divisa de la apuesta", choices=["Cobre", "Plata", "Oro", "Platino"]),
+        cantidad: discord.Option(int, "Cantidad a apostar (Máx 500 po equivalentes)", min_value=1)
+    ):
+        apuesta_pc = self._convertir_a_cobre(moneda, cantidad)
+        if apuesta_pc > 50000:
+            await ctx.respond("❌ El límite de apuesta para las mesas VIP es de 500 Oro.", ephemeral=True)
+            return
+
+        import database
+        await ctx.response.defer()
+
+        # Cobro inicial
+        exito_cobro = await database.transferir_fondos(ctx.user.id, 0, apuesta_pc)
+        if not exito_cobro:
+            await ctx.followup.send("❌ Tus bolsillos están vacíos. Retírate de la mesa.", ephemeral=True)
+            return
+
+        # NOTA EDUCATIVA: Lógica pura de Python para barajar cartas.
+        # Creamos una baraja infinita (con reemplazo) para simplificar la lógica de memoria,
+        # asignando valores fijos a las figuras (J, Q, K = 10) y Ases (11 o 1 según convenga).
+        cartas = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11] * 4
+
+        def pedir_carta():
+            return random.choice(cartas)
+
+        def calcular_mano(mano):
+            total = sum(mano)
+            ases = mano.count(11)
+            # El As vale 1 si nos pasamos de 21
+            while total > 21 and ases > 0:
+                total -= 10
+                ases -= 1
+            return total
+
+        # Manos iniciales
+        mano_jugador = [pedir_carta(), pedir_carta()]
+        mano_casa = [pedir_carta(), pedir_carta()]
+
+        class BlackjackView(discord.ui.View):
+            def __init__(self, taberna_cog):
+                super().__init__(timeout=120)
+                self.cog = taberna_cog
+
+            def crear_embed_juego(self, ocultar_casa=True, estado="En curso"):
+                total_jugador = calcular_mano(mano_jugador)
+
+                # Visualización de la casa
+                if ocultar_casa:
+                    texto_casa = f"🎴 [Carta Oculta], {mano_casa[1]}\n**Total Visible:** {mano_casa[1]}"
+                else:
+                    total_casa = calcular_mano(mano_casa)
+                    texto_casa = f"🃏 {mano_casa}\n**Total:** {total_casa}"
+
+                color = discord.Color.blue()
+                if "¡Victoria!" in estado or "Blackjack!" in estado: color = discord.Color.green()
+                elif "Empate" in estado: color = discord.Color.gold()
+                elif "Derrota" in estado or "¡Te pasaste!" in estado: color = discord.Color.red()
+
+                embed = discord.Embed(title="🃏 MESA DE BLACKJACK 🃏", description=estado, color=color)
+                embed.add_field(name=f"Mano de {ctx.user.name}", value=f"🃏 {mano_jugador}\n**Total:** {total_jugador}", inline=True)
+                embed.add_field(name="Mano de la Casa", value=texto_casa, inline=True)
+                embed.set_footer(text=f"Apuesta en juego: {cantidad} {moneda}")
+                return embed
+
+            async def finalizar_juego(self, interaction: discord.Interaction, embed, total_jugador, total_casa):
+                for child in self.children:
+                    child.disabled = True
+
+                # Lógica de Pago
+                if total_jugador > 21:
+                    pass # Pierde (El dinero ya se dedujo al inicio)
+                elif total_casa > 21 or total_jugador > total_casa:
+                    # Gana
+                    await database.emitir_fondos_reserva(ctx.user.id, apuesta_pc * 2)
+                elif total_jugador == total_casa:
+                    # Empate (Push) - Recupera su apuesta original sin ganancias
+                    await database.emitir_fondos_reserva(ctx.user.id, apuesta_pc)
+
+                await interaction.response.edit_message(embed=embed, view=self)
+
+            @discord.ui.button(label="Pedir (Hit)", style=discord.ButtonStyle.primary, emoji="👇")
+            async def pedir(self, button: discord.ui.Button, interaction: discord.Interaction):
+                if interaction.user.id != ctx.user.id:
+                    return await interaction.response.send_message("❌ Esta no es tu mano.", ephemeral=True)
+
+                mano_jugador.append(pedir_carta())
+                total_jugador = calcular_mano(mano_jugador)
+
+                if total_jugador > 21:
+                    embed = self.crear_embed_juego(ocultar_casa=False, estado="💀 **¡Te pasaste! Derrota.** La Casa se queda con tu dinero.")
+                    await self.finalizar_juego(interaction, embed, total_jugador, calcular_mano(mano_casa))
+                else:
+                    await interaction.response.edit_message(embed=self.crear_embed_juego())
+
+            @discord.ui.button(label="Plantarse (Stand)", style=discord.ButtonStyle.danger, emoji="✋")
+            async def plantarse(self, button: discord.ui.Button, interaction: discord.Interaction):
+                if interaction.user.id != ctx.user.id:
+                    return await interaction.response.send_message("❌ Esta no es tu mano.", ephemeral=True)
+
+                total_jugador = calcular_mano(mano_jugador)
+                total_casa = calcular_mano(mano_casa)
+
+                # La casa está obligada a pedir si tiene 16 o menos
+                while total_casa < 17:
+                    mano_casa.append(pedir_carta())
+                    total_casa = calcular_mano(mano_casa)
+
+                estado = ""
+                if total_casa > 21:
+                    estado = f"🎉 **¡La Casa se pasó ({total_casa})! ¡Victoria!** Ganas `{cantidad} {moneda}` de beneficio."
+                elif total_jugador > total_casa:
+                    estado = f"🎉 **¡Victoria!** Superas a la Casa ({total_jugador} vs {total_casa})."
+                elif total_jugador < total_casa:
+                    estado = f"💸 **Derrota.** La Casa gana ({total_casa} vs {total_jugador})."
+                else:
+                    estado = "🤝 **Empate (Push).** Recuperas tu apuesta."
+
+                embed = self.crear_embed_juego(ocultar_casa=False, estado=estado)
+                await self.finalizar_juego(interaction, embed, total_jugador, total_casa)
+
+        # Validación automática de Blackjack natural al repartir las cartas
+        total_inicial_jugador = calcular_mano(mano_jugador)
+        total_inicial_casa = calcular_mano(mano_casa)
+
+        view = BlackjackView(self)
+
+        if total_inicial_jugador == 21:
+            if total_inicial_casa == 21:
+                # Empate de Blackjacks
+                embed = view.crear_embed_juego(ocultar_casa=False, estado="🤝 **¡Doble Blackjack! Empate.** Recuperas tu apuesta.")
+                await database.emitir_fondos_reserva(ctx.user.id, apuesta_pc)
+            else:
+                # El jugador sacó 21 a la primera (El Blackjack clásico suele pagar 3 a 2, aquí daremos ganancia doble total para recompensar)
+                embed = view.crear_embed_juego(ocultar_casa=False, estado=f"🃏 **¡BLACKJACK NATURAL!** Ganas automáticamente `{cantidad * 2} {moneda}` extra.")
+                await database.emitir_fondos_reserva(ctx.user.id, apuesta_pc * 3)
+
+            for child in view.children: child.disabled = True
+            await ctx.followup.send(embed=embed, view=view)
+            return
+
+        # Si no hubo 21 instantáneo, sigue el juego con la interfaz activa
+        await ctx.followup.send(embed=view.crear_embed_juego(), view=view)
+
+
 def setup(bot):
     bot.add_cog(TabernaCog(bot))
