@@ -123,6 +123,8 @@ class FormularioReporteSesion(discord.ui.Modal):
                     mapa_miembros = {}
                     for m in guild.members:
                         mapa_miembros[m.name.lower()] = m
+                        if hasattr(m, 'global_name') and m.global_name:
+                            mapa_miembros[m.global_name.lower()] = m
                         if m.nick:
                             mapa_miembros[m.nick.lower()] = m
 
