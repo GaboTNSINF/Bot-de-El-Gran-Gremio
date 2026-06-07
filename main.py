@@ -46,6 +46,8 @@ async def ejecutar_bot():
     y garantiza el cierre limpio de conexiones asíncronas (Discord + SQLite).
     """
     # Inicialización del Bot diferida dentro del loop activo
+    # NOTA EDUCATIVA: Instanciar el bot aquí (dentro de un contexto async) es una práctica excelente.
+    # Previene el clásico error de Pycord: "Future attached to a different loop" al reiniciar conexiones.
     bot = GremioBot(intents=intents, debug_guilds=[config.GUILD_ID])
 
     extensiones = [
@@ -58,7 +60,8 @@ async def ejecutar_bot():
         "cogs.sesiones",
         "cogs.seguridad",
         "cogs.personal",
-        "cogs.economia"  
+        "cogs.economia",
+        "cogs.dados" # AGREGAMOS EL NUEVO MÓDULO DE DADOS
     ]
 
     print("🔌 Cargando módulos del sistema de forma síncrona...")

@@ -112,6 +112,14 @@ class EconomiaCog(commands.Cog):
             await ctx.respond("❌ **Acceso Denegado:** Requiere credenciales de la Alta Directiva Suprema.", ephemeral=True)
             return
 
+        # BLINDAJE DE ECONOMÍA: Filtro de seguridad que valida que la cantidad ingresada sea positiva,
+        # esto previene que un admin por error ingrese un negativo e intercepte fondos del usuario.
+        if cantidad <= 0:
+            await ctx.respond("❌ **Error Transaccional:** La cantidad a emitir debe ser estrictamente mayor a cero.", ephemeral=True)
+            return
+
+        # NOTA EDUCATIVA: Retrasamos el envío de respuesta de Discord (defer) para evitar
+        # que el comando diga "La aplicación no respondió" si la base de datos se demora.
         await ctx.response.defer(ephemeral=True)
         cobre_bruto = self._convertir_a_cobre(moneda, cantidad)
 
@@ -158,6 +166,11 @@ class EconomiaCog(commands.Cog):
         ]),
         cantidad: discord.Option(int, "Cantidad de monedas a enviar", min_value=1)
     ):
+        # BLINDAJE P2P: Validar que los usuarios no puedan enviar monedas en negativo.
+        if cantidad <= 0:
+            await ctx.respond("❌ **Error Transaccional:** El monto debe ser superior a cero.", ephemeral=True)
+            return
+
         if usuario.id == ctx.user.id:
             await ctx.respond("❌ **Error Transaccional:** No puedes transferir fondos hacia tu propia cuenta corriente.", ephemeral=True)
             return
@@ -171,6 +184,9 @@ class EconomiaCog(commands.Cog):
         receptor_id = 0 if usuario.id == self.bot.user.id else usuario.id
 
         # Transferencia P2P atómica libre de condiciones de carrera
+        # NOTA EDUCATIVA: Atómico significa que toda la operación en base de datos pasa como un bloque sólido:
+        # o el dinero se mueve completo o falla y no pasa nada. Esto impide que se reste dinero pero no se sume,
+        # o que un jugador duplique monedas spameando el comando simultáneamente con bots externos.
         exito = await database.transferir_fondos(ctx.user.id, receptor_id, cobre_bruto)
 
         if not exito:

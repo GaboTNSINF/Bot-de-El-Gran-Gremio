@@ -75,6 +75,10 @@ class VistaReclamacion(discord.ui.View):
             await canal_actual.edit(name=nuevo_nombre, overwrites=overwrites)
         except discord.Forbidden:
             print(f"❌ Error de permisos al intentar editar el canal del ticket {canal_actual.name}")
+        except discord.NotFound:
+            # BLINDAJE: Si el canal fue borrado mientras alguien apretaba el botón.
+            print(f"⚠️ El canal del ticket fue borrado durante la asignación.")
+            return
 
         # 8. Notificación formal de asignación
         mencion_creador = usuario_creador.mention if usuario_creador else f"<@{usuario_creador_id}>"
@@ -84,7 +88,10 @@ class VistaReclamacion(discord.ui.View):
                         f"A partir de este momento, se inicia el proceso formal de revisión.",
             color=discord.Color.green()
         )
-        await canal_actual.send(embed=embed_asignado)
+        try:
+            await canal_actual.send(embed=embed_asignado)
+        except discord.NotFound:
+            pass # Ignoramos silenciosamente si el canal ya no existe
 
 
 class TicketBotonera(discord.ui.View):
@@ -174,6 +181,8 @@ class TicketsCog(commands.Cog):
 
         # Validación estructural estricta de seguridad anti-vandalismo en canales públicos
         if "admision-" in ctx.channel.name or "⌛-" in ctx.channel.name:
+            # NOTA EDUCATIVA: Usamos ephemeral=False aquí para que el mensaje se mande al chat
+            # del canal que está a punto de borrarse.
             await ctx.respond("🧹 Clausurando y eliminando canal en 3 segundos...")
             await asyncio.sleep(3)
             
@@ -183,6 +192,9 @@ class TicketsCog(commands.Cog):
                 pass  # Mitigar excepciones concurrentes de destrucción
             except discord.Forbidden:
                 print(f"❌ Error de permisos: No se pudo eliminar el canal {ctx.channel.name} por jerarquía insuficiente.")
+            except Exception as e:
+                # BLINDAJE: Atrapamos cualquier otro error inesperado de red para que el bot no crashee
+                print(f"⚠️ Error inesperado al intentar borrar el ticket: {e}")
         else:
             await ctx.respond("❌ Error: Este comando solo puede ser ejecutado dentro de un canal de ticket válido.", ephemeral=True)
 

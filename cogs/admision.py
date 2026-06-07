@@ -129,7 +129,11 @@ class ConfirmacionRegistro(discord.ui.View):
         await asyncio.sleep(5)
         try:
             await interaction.channel.delete()
-        except discord.NotFound: pass
+        except discord.NotFound:
+            # BLINDAJE: Si otro mod borra el canal a mano antes de que pasen los 5 segundos.
+            pass
+        except discord.Forbidden:
+            print("⚠️ No tengo permisos para borrar este canal de ticket.")
 
     @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.danger, custom_id="btn_cancelar_reg")
     async def cancelar(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -210,6 +214,9 @@ class AdmisionCog(commands.Cog):
         # El bot detectó la plantilla rellena. Procedemos al procesamiento asíncrono seguro
         content = message.content
         try:
+            # BLINDAJE REGEX: Usar regex es útil, pero si el usuario no pone el espacio o usa un formato
+            # ligeramente distinto en celular, crasheará. Las regex actuales en tu código son robustas,
+            # pero atrapamos el error si no hacen match para no matar el event loop.
             nombre = re.search(r"Nombre:\s*(.*)", content).group(1).strip()
             raza = re.search(r"Raza:\s*(.*)", content).group(1).strip()
             clase = re.search(r"Clase:\s*(.*)", content).group(1).strip()
@@ -219,9 +226,17 @@ class AdmisionCog(commands.Cog):
             
             edad = int(edad_str)
             if not (nombre and raza and clase and estatura and link):
-                raise ValueError()
-        except Exception:
-            await message.channel.send("❌ **ERROR DE REGISTRO:** Estructura corrupta. Asegúrate de rellenar los datos correctamente detrás de cada dos puntos (:).")
+                raise ValueError("Faltan datos obligatorios")
+        except AttributeError:
+            # Si un Regex falla (retorna None), el .group(1) lanza AttributeError
+            await message.channel.send("❌ **ERROR DE REGISTRO:** Estructura corrupta. Asegúrate de rellenar TODOS los campos correctamente detrás de cada dos puntos (:).")
+            return
+        except ValueError:
+            # Si la edad no es un número entero
+            await message.channel.send("❌ **ERROR DE REGISTRO:** La edad debe ser un número entero.")
+            return
+        except Exception as e:
+            await message.channel.send(f"❌ **ERROR INESPERADO:** {e}")
             return
 
         # Purgamos el canal de la RAM de sesiones activas ya que el objetivo fue capturado
