@@ -140,10 +140,9 @@ async def registrar_personaje(user_id: int, name: str, race: str, char_class: st
     await _connection.commit()
 
 async def eliminar_personaje(user_id: int):
-    async with _connection.execute("SELECT 1 FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
-        if not await cursor.fetchone():
+    async with _connection.execute("DELETE FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
+        if cursor.rowcount == 0:
             return False
-    await _connection.execute("DELETE FROM aventureros WHERE user_id = ?", (user_id,))
     await _connection.commit()
     return True
 
@@ -155,10 +154,9 @@ async def guardar_registro_matchmaking(user_id: int, rol: str, tier: str, dias: 
     await _connection.commit()
 
 async def eliminar_de_cola(user_id: int):
-    async with _connection.execute("SELECT 1 FROM matchmaking WHERE user_id = ?", (user_id,)) as cursor:
-        if not await cursor.fetchone():
+    async with _connection.execute("DELETE FROM matchmaking WHERE user_id = ?", (user_id,)) as cursor:
+        if cursor.rowcount == 0:
             return False
-    await _connection.execute("DELETE FROM matchmaking WHERE user_id = ?", (user_id,))
     await _connection.commit()
     return True
 
@@ -167,22 +165,20 @@ async def obtener_toda_la_cola():
         return await cursor.fetchall()
 
 async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int):
-    async with _connection.execute("SELECT 1 FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
-        if not await cursor.fetchone():
+    async with _connection.execute("UPDATE aventureros SET nivel = ? WHERE user_id = ?", (nuevo_nivel, user_id)) as cursor:
+        if cursor.rowcount == 0:
             return False
-    await _connection.execute("UPDATE aventureros SET nivel = ? WHERE user_id = ?", (nuevo_nivel, user_id))
     await _connection.commit()
     return True   
 
 async def editar_datos_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str):
-    async with _connection.execute("SELECT 1 FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
-        if not await cursor.fetchone():
-            return False
-    await _connection.execute("""
+    async with _connection.execute("""
         UPDATE aventureros 
         SET char_name = ?, char_race = ?, char_class = ?, char_age = ?, char_height = ?, sheet_link = ?
         WHERE user_id = ?
-    """, (name, race, char_class, age, height, link, user_id))
+    """, (name, race, char_class, age, height, link, user_id)) as cursor:
+        if cursor.rowcount == 0:
+            return False
     await _connection.commit()
     return True
 
