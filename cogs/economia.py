@@ -5,8 +5,8 @@ from discord.ext import commands
 import config
 import database
 
-# ID del canal general donde el bot pregonará las transacciones públicas
-CANAL_GENERAL_ID = 1510033477477728316
+# ID del canal privado donde el bot enviará los registros de auditoría
+CANAL_LOGS_ID = 1513250885730570442
 
 class EconomiaCog(commands.Cog):
     """Módulo maestro encargado de la lógica transaccional y el control bancario del Gremio."""
@@ -200,21 +200,22 @@ class EconomiaCog(commands.Cog):
 
         await ctx.followup.send(f"✅ Has emitido exitosamente `{cantidad} {moneda}` desde las arcas del Gremio hacia la cuenta de {usuario.name}.", ephemeral=True)
 
-        # Pregonazo público seguro envuelto en bloque defensivo de red
-        canal_general = ctx.guild.get_channel(CANAL_GENERAL_ID)
-        if canal_general:
-            embed_pub = discord.Embed(
-                title="🏛 Imbricación de Fondos Presupuestarios",
-                description=f"La Tesorería del Gremio ha emitido una partida presupuestaria para {usuario.mention}.\n\n"
-                            f"💰 **Monto Otorgado:** `{cantidad} {moneda.upper()}`\n"
-                            f"⚖️ *Concepto:* Financiamiento Oficial / Asignación de Estipendio.",
+        # Envío silencioso al canal de Auditoría
+        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        if canal_logs:
+            embed_log = discord.Embed(
+                title="📜 AUDITORÍA: EMISIÓN DE FONDOS",
+                description=f"**Ejecutivo:** {ctx.user.mention}\n"
+                            f"**Receptor:** {usuario.mention}\n"
+                            f"**Monto Emitido:** `{cantidad} {moneda.upper()}`\n"
+                            f"**Concepto:** Financiamiento Oficial / Asignación Directa.",
                 color=discord.Color.blue()
             )
-            embed_pub.set_footer(text=f"Autorizado por la Alta Gerencia: {ctx.user.name}")
+            embed_log.set_footer(text="Registro Interno de la Tesorería Central")
             try:
-                await canal_general.send(embed=embed_pub)
+                await canal_logs.send(embed=embed_log)
             except discord.HTTPException as e:
-                print(f"⚠️ No se pudo enviar el pregonazo de emisión al canal general debido a un error de API: {e}")
+                print(f"⚠️ No se pudo enviar el log de emisión al canal de auditoría debido a un error de API: {e}")
 
 
     # =========================================================================
@@ -266,23 +267,22 @@ class EconomiaCog(commands.Cog):
         else:
             await ctx.followup.send(f"💸 Has transferido `{cantidad} {moneda}` a la cuenta de {usuario.name}.", ephemeral=True)
 
-        # Pregonazo público blindado contra caídas de canales
-        canal_general = ctx.guild.get_channel(CANAL_GENERAL_ID)
-        if canal_general:
-            nombre_receptor = "🏛️ BÓVEDA CENTRAL (TIENDA)" if receptor_id == 0 else usuario.mention
-            embed_pub = discord.Embed(
-                title="💸 TRANSACCIÓN BANCARIA REGISTRADA",
-                description=f"Se ha verificado un movimiento de divisas en los libros de la banca.\n\n"
-                            f"👤 **Emisor:** {ctx.user.mention}\n"
-                            f"🤝 **Receptor:** {nombre_receptor}\n"
-                            f"💰 **Monto:** `{cantidad} {moneda.upper()}`",
-                color=discord.Color.green() if receptor_id != 0 else discord.Color.gold()
+        # Envío silencioso al canal de Auditoría
+        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        if canal_logs:
+            nombre_receptor = "🏛️ BÓVEDA CENTRAL" if receptor_id == 0 else usuario.mention
+            embed_log = discord.Embed(
+                title="📜 AUDITORÍA: TRANSFERENCIA (P2P)",
+                description=f"**Emisor:** {ctx.user.mention}\n"
+                            f"**Receptor:** {nombre_receptor}\n"
+                            f"**Monto Transferido:** `{cantidad} {moneda.upper()}`",
+                color=discord.Color.light_grey() if receptor_id != 0 else discord.Color.gold()
             )
-            embed_pub.set_footer(text="Libro Contable del Gremio — Registro Limpio")
+            embed_log.set_footer(text="Auditoría Automática de la Red Bancaria")
             try:
-                await canal_general.send(embed=embed_pub)
+                await canal_logs.send(embed=embed_log)
             except discord.HTTPException as e:
-                print(f"⚠️ Falló el pregonazo de pago en el canal general debido a restricciones de Discord: {e}")
+                print(f"⚠️ Falló el log de transferencia P2P en el canal de auditoría debido a restricciones de Discord: {e}")
 
 def setup(bot):
     bot.add_cog(EconomiaCog(bot))
