@@ -46,6 +46,9 @@ async def init_db():
     if "sesiones_jugadas" not in columnas_existentes:
         await _connection.execute("ALTER TABLE aventureros ADD COLUMN sesiones_jugadas INTEGER DEFAULT 0")
 
+    # Índice para acelerar el cálculo del Ladder de Aventureros (Optimización de Bolt ⚡)
+    await _connection.execute("CREATE INDEX IF NOT EXISTS idx_aventureros_ladder ON aventureros (nivel DESC, sesiones_jugadas DESC)")
+
     # 2. Tabla Base: Sistema de Matchmaking
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS matchmaking (
@@ -78,6 +81,9 @@ async def init_db():
             FOREIGN KEY (dm_id) REFERENCES registro_dms(dm_id)
         )
     """)
+
+    # Índice para acelerar las búsquedas por dm_id en reseñas (Optimización de Bolt ⚡)
+    await _connection.execute("CREATE INDEX IF NOT EXISTS idx_resenas_dm_id ON reseñas_dms (dm_id)")
 
     # 5. Tabla de Control de Anclas de Embeds Fijos
     await _connection.execute("""
