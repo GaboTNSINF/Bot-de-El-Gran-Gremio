@@ -108,6 +108,7 @@ class EconomiaCog(commands.Cog):
         # Matriz de Sueldos Semanales (En piezas de cobre brutas para inyección directa)
         # Puedes balancear estos montos a futuro. Ej: 50000 pc = 50 po.
         escala_salarial = {
+            "jefe": 60000,
             "supervisor": 50000,
             "oficial": 40000,
             "experto": 30000,
@@ -127,25 +128,38 @@ class EconomiaCog(commands.Cog):
         total_gasto_pc = 0
 
         # Recuperar y pagar a todos por cada rama registrada en el bot
-        for key_rama in config.CONFIG_RAMAS.keys():
+        for key_rama, datos_rama in config.CONFIG_RAMAS.items():
+            # 1. PAGO A LA JEFATURA (Extraído del Rol de Discord, no de la BD)
+            # NOTA EDUCATIVA: Los jefes no se contratan por el bot, obtienen su poder directo de su Rol.
+            rol_jefe = ctx.guild.get_role(datos_rama["jefe_id"])
+            if rol_jefe:
+                for jefe in rol_jefe.members:
+                    sueldo_jefe = escala_salarial["jefe"]
+                    exito_jefe = await database.emitir_fondos_reserva(jefe.id, sueldo_jefe)
+                    if exito_jefe:
+                        total_empleados_pagados += 1
+                        total_gasto_pc += sueldo_jefe
+                    else:
+                        await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda se quedó sin fondos intentando pagar al Jefe {jefe.mention}. Proceso abortado.")
+                        return
+
+            # 2. PAGO AL ESCALAFÓN OPERATIVO (Extraído de la BD mediante /contratar)
             personal_rama = await database.obtener_personal_division(key_rama)
-            if not personal_rama:
-                continue
+            if personal_rama:
+                for empleado in personal_rama:
+                    user_id = empleado["user_id"]
+                    rango = empleado["rango_interno"].lower()
+                    sueldo_asignado = escala_salarial.get(rango, 10000) # 10po base si el rango no está en la escala
 
-            for empleado in personal_rama:
-                user_id = empleado["user_id"]
-                rango = empleado["rango_interno"].lower()
-                sueldo_asignado = escala_salarial.get(rango, 10000) # 10po base si el rango no está en la escala
+                    # Emitimos los fondos atómicamente desde la Bóveda hacia el empleado
+                    exito = await database.emitir_fondos_reserva(user_id, sueldo_asignado)
 
-                # Emitimos los fondos atómicamente desde la Bóveda hacia el empleado
-                exito = await database.emitir_fondos_reserva(user_id, sueldo_asignado)
-
-                if exito:
-                    total_empleados_pagados += 1
-                    total_gasto_pc += sueldo_asignado
-                else:
-                    await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda se quedó sin fondos intentando pagar a <@{user_id}>. Proceso de nómina abortado a la mitad.")
-                    return
+                    if exito:
+                        total_empleados_pagados += 1
+                        total_gasto_pc += sueldo_asignado
+                    else:
+                        await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda se quedó sin fondos intentando pagar a <@{user_id}>. Proceso de nómina abortado a la mitad.")
+                        return
 
         # Reporte final
         if total_empleados_pagados == 0:
