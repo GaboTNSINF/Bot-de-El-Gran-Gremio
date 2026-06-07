@@ -364,6 +364,46 @@ async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
     await _connection.commit()
     return True  
 
+# --- HERRAMIENTAS DE CONTROL FISCAL (INCAUTACIÓN) ---
+
+async def embargar_fondos(user_id: int) -> int:
+    """Extrae la totalidad de los fondos de un usuario y los inyecta en la Bóveda Central (id 0)."""
+    # 1. Leemos el saldo actual
+    saldo_recuperado = 0
+    async with _connection.execute("SELECT balance_pc FROM cuentas_bancarias WHERE id_entidad = ?", (user_id,)) as cursor:
+        row = await cursor.fetchone()
+        if not row or row["balance_pc"] <= 0:
+            return 0  # No hay nada que embargar
+        saldo_recuperado = row["balance_pc"]
+
+    # 2. Vaciamos la cuenta del usuario
+    await _connection.execute("UPDATE cuentas_bancarias SET balance_pc = 0 WHERE id_entidad = ?", (user_id,))
+
+    # 3. Lo inyectamos de vuelta a la bóveda
+    await _connection.execute("UPDATE cuentas_bancarias SET balance_pc = balance_pc + ? WHERE id_entidad = 0", (saldo_recuperado,))
+    await _connection.commit()
+    return saldo_recuperado
+
+async def embargo_masivo() -> int:
+    """Wipe económico total: Transfiere todos los fondos de los jugadores a la Bóveda Central."""
+    # 1. Calculamos la suma de todo el oro circulante en las cuentas (excluyendo la Bóveda, id_entidad 0)
+    saldo_total_recuperado = 0
+    async with _connection.execute("SELECT SUM(balance_pc) as total FROM cuentas_bancarias WHERE id_entidad != 0") as cursor:
+        row = await cursor.fetchone()
+        if row and row["total"]:
+            saldo_total_recuperado = row["total"]
+
+    if saldo_total_recuperado > 0:
+        # 2. Reseteamos el balance de todas las cuentas que no sean la bóveda a 0
+        await _connection.execute("UPDATE cuentas_bancarias SET balance_pc = 0 WHERE id_entidad != 0")
+
+        # 3. Sumamos ese total recolectado a la Bóveda Central
+        await _connection.execute("UPDATE cuentas_bancarias SET balance_pc = balance_pc + ? WHERE id_entidad = 0", (saldo_total_recuperado,))
+        await _connection.commit()
+
+    return saldo_total_recuperado
+
+
 async def cerrar_db():
     global _connection
     if _connection is not None:

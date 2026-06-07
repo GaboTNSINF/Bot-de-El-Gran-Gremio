@@ -233,6 +233,62 @@ class EconomiaCog(commands.Cog):
 
 
     # =========================================================================
+    # 🛡️ COMANDOS DE INCAUTACIÓN Y WIPE ECONÓMICO (BETA)
+    # =========================================================================
+
+    @commands.slash_command(name="banco_embargar", description="[SUPREME] Incauta todo el dinero de un usuario y lo devuelve a la Bóveda Central.")
+    async def banco_embargar(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Usuario a embargar")):
+        if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
+            await ctx.respond("❌ **Acceso Denegado.**", ephemeral=True)
+            return
+
+        await ctx.response.defer(ephemeral=True)
+        recuperado_pc = await database.embargar_fondos(usuario.id)
+
+        if recuperado_pc == 0:
+            await ctx.followup.send(f"⚠️ El usuario {usuario.name} ya tiene sus bolsillos vacíos.", ephemeral=True)
+            return
+
+        await ctx.followup.send(f"⚖️ Se han incautado `{recuperado_pc:,} pc` de {usuario.name}. Los fondos retornaron a la Bóveda.", ephemeral=True)
+
+        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        if canal_logs:
+            embed_log = discord.Embed(
+                title="⚖️ AUDITORÍA: EMBARGO FISCAL",
+                description=f"**Sujeto:** {usuario.mention}\n"
+                            f"**Monto Incautado:** `{recuperado_pc:,} pc`\n"
+                            f"**Ejecutor:** {ctx.user.mention}",
+                color=discord.Color.dark_red()
+            )
+            embed_log.set_footer(text="Fondos inyectados de regreso a la Bóveda Central.")
+            await canal_logs.send(embed=embed_log)
+
+    @commands.slash_command(name="banco_wipe_beta", description="[SUPREME] Vacía las cuentas de TODO EL SERVIDOR y retorna los fondos a la Bóveda.")
+    async def banco_wipe_beta(self, ctx: discord.ApplicationContext):
+        if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
+            await ctx.respond("❌ **Acceso Denegado.** Comando altamente destructivo.", ephemeral=True)
+            return
+
+        await ctx.response.defer(ephemeral=False)
+        recuperado_total = await database.embargo_masivo()
+
+        embed = discord.Embed(
+            title="⚠️ RESETEO ECONÓMICO GLOBAL (WIPE)",
+            description="Por decreto de los Fundadores, se ha ejecutado un embargo global sobre todos los habitantes del reino.\n"
+                        "Las cuentas han vuelto a 0 y el oro circulante ha retornado a la Tesorería.",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="💰 Oro Total Recuperado", value=f"`{recuperado_total:,} pc`")
+        embed.set_footer(text=f"Orden Ejecutada por: {ctx.user.name}")
+
+        await ctx.followup.send(embed=embed)
+
+        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        if canal_logs:
+            await canal_logs.send(embed=embed)
+
+
+    # =========================================================================
     # ⚔ COMANDO COMERCIAL P2P / TIENDA: INTERCAMBIO LIBRE DE FONDOS
     # =========================================================================
 
