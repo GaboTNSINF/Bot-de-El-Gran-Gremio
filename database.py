@@ -85,6 +85,9 @@ async def init_db():
     # Índice para acelerar las búsquedas por dm_id en reseñas (Optimización de Bolt ⚡)
     await _connection.execute("CREATE INDEX IF NOT EXISTS idx_resenas_dm_id ON reseñas_dms (dm_id)")
 
+    # Índice para acelerar la extracción del Top de DMs (Optimización de Bolt ⚡)
+    await _connection.execute("CREATE INDEX IF NOT EXISTS idx_dms_partidas ON registro_dms (partidas_narradas DESC)")
+
     # 5. Tabla de Control de Anclas de Embeds Fijos
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS control_nominas (
@@ -218,17 +221,21 @@ async def obtener_ladder_aventureros():
         return await cursor.fetchall()
 
 async def obtener_ladder_dms():
-    # SOLUCIÓN COMPLETA AL ANTIPATRÓN N+1: Todo el procesamiento métrico delegado de manera eficiente al motor SQL
+    # SOLUCIÓN COMPLETA AL ANTIPATRÓN N+1 (Optimizada por Bolt ⚡):
+    # Extraer el Top 10 ANTES de hacer el LEFT JOIN masivo O(N*M) con todas las reseñas del servidor
     query = """
         SELECT 
             d.dm_id, d.nombre_dm, d.rango_licencia, d.partidas_narradas,
             COUNT(CASE WHEN r.valoracion = 1 THEN 1 END) as excelencias,
             COUNT(CASE WHEN r.valoracion = -1 THEN 1 END) as alertas
-        FROM registro_dms d
+        FROM (
+            SELECT * FROM registro_dms
+            ORDER BY partidas_narradas DESC
+            LIMIT 10
+        ) d
         LEFT JOIN reseñas_dms r ON d.dm_id = r.dm_id
         GROUP BY d.dm_id
         ORDER BY d.partidas_narradas DESC
-        LIMIT 10
     """
     async with _connection.execute(query) as cursor:
         rows = await cursor.fetchall()
