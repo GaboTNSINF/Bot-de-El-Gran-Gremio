@@ -43,6 +43,13 @@ class VozDinamicaCog(commands.Cog):
                 )
             }
 
+            # BLINDAJE VOZ: Los Viajeros (no registrados) no pueden ver ni entrar a las mesas de juego.
+            # En Discord, cuando envías `overwrites` manuales al crear un canal, la herencia de la Categoría se rompe.
+            # Por tanto, debemos inyectar la prohibición manualmente aquí.
+            rol_viajero = guild.get_role(config.ROL_VIAJERO)
+            if rol_viajero:
+                overwrites[rol_viajero] = discord.PermissionOverwrite(view_channel=False, connect=False)
+
             # Crear físicamente el canal de voz temporal en la API de Discord
             nombre_sala = f"🔊 Mesa de {member.name}"
             
