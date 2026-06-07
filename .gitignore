@@ -1,0 +1,19 @@
+# .gitignore
+
+# Purgar el archivo de credenciales místicas (¡NUNCA SUBIR!)
+.env
+
+# Purgar la base de datos física local para evitar fugas de datos de los usuarios
+gremio.db
+gremio.db-wal
+gremio.db-shm
+
+# Purgar el entorno virtual local (tus amigos deben crear el suyo propio)
+venv/
+.venv/
+
+# Purgar la caché de compilación de Python
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.vscode/
