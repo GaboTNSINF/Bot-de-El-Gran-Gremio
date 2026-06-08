@@ -55,5 +55,58 @@ class SeguridadCog(commands.Cog):
         except Exception as e:
             print(f"⚠️ Anomalía imprevista en el motor de la guillotina: {e}")
 
+    @discord.slash_command(name="purga", description="Elimina historial de mensajes (Solo Fundador/Co-Fundador).")
+    @discord.guild_only()
+    async def purga(self, ctx: discord.ApplicationContext, cantidad: discord.Option(int, "Cantidad de mensajes a borrar (Dejar vacío para purga total)", required=False, default=None)): # type: ignore
+        """
+        Comando exclusivo para Alta Administración (Fundadores)
+        Permite purgar un canal completo o una cantidad específica de mensajes.
+        Discord restringe la purga masiva a mensajes con un máximo de 14 días de antigüedad.
+        Para evitar 'Rate Limits' y congelamiento, aplicamos estricto filtro de fechas (after).
+        """
+        # --- VALIDACIÓN DE JERARQUÍA (Solo Fundador y Co-Fundador) ---
+        # Aseguramos que la lista pertenezca estrictamente a esos dos roles verificados en config.py
+        roles_autorizados = [
+            1509952429586780332,  # ID Rol Fundador
+            1509954249436696758   # ID Rol Co-Fundador
+        ]
+
+        # Validación segura en caso de que algún error pase el filtro de guild_only
+        if not hasattr(ctx.author, 'roles'):
+            await ctx.respond("❌ Este comando solo puede ser usado dentro del servidor.", ephemeral=True)
+            return
+
+        autorizado = any(rol.id in roles_autorizados for rol in ctx.author.roles)
+        if not autorizado:
+            await ctx.respond("❌ No tienes la autoridad requerida (Fundador/Co-Fundador) para invocar este comando.", ephemeral=True)
+            return
+
+        # --- AVISO INICIAL (EFÍMERO) ---
+        await ctx.respond("🧹 Iniciando protocolo de purga en este canal... Por favor, espera.", ephemeral=True)
+
+        try:
+            import datetime
+            # Calculamos la fecha de corte exacta: 14 días hacia atrás desde el momento actual en UTC
+            # BLINDAJE: Evita que Discord empiece a borrar mensajes 1x1 causando un Rate Limit masivo.
+            corte_14_dias = discord.utils.utcnow() - datetime.timedelta(days=14)
+
+            # --- EJECUCIÓN DE PURGA ---
+            limit = cantidad if cantidad is not None else 10000
+
+            # purge() con bulk=True (por defecto) y límite de fecha after.
+            deleted = await ctx.channel.purge(limit=limit, after=corte_14_dias, bulk=True)
+
+            # --- INFORME FINAL (EFÍMERO) ---
+            if len(deleted) > 0:
+                await ctx.interaction.edit_original_response(content=f"✅ Protocolo completado. Se han purgado `{len(deleted)}` mensajes.\n*(Nota: Mensajes anteriores a 14 días han sido ignorados por seguridad).*")
+            else:
+                await ctx.interaction.edit_original_response(content="⚠️ No se borraron mensajes. El canal está vacío o todos los mensajes son más antiguos de 14 días.")
+
+        except discord.Forbidden:
+            await ctx.interaction.edit_original_response(content="❌ Error: El bot no tiene permisos suficientes para borrar mensajes en este canal.")
+        except discord.HTTPException as e:
+            await ctx.interaction.edit_original_response(content=f"❌ Error de la API de Discord al intentar purgar: {e}")
+
+
 def setup(bot):
     bot.add_cog(SeguridadCog(bot))
