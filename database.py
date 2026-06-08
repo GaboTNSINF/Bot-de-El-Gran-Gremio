@@ -139,9 +139,63 @@ async def init_db():
             user_id INTEGER NOT NULL,
             producto_nombre TEXT NOT NULL,
             cantidad INTEGER DEFAULT 1,
+            origen TEXT DEFAULT 'tienda', -- 'tienda' o 'nivel20' (Para marcar lo sincronizado)
             FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
         )
     """)
+
+    # 10. Tablas para información mecánica de la hoja de personaje extraída de Nivel20
+    await _connection.execute("""
+        CREATE TABLE IF NOT EXISTS ficha_estadisticas (
+            user_id INTEGER PRIMARY KEY,
+            fuerza INTEGER NOT NULL,
+            destreza INTEGER NOT NULL,
+            constitucion INTEGER NOT NULL,
+            inteligencia INTEGER NOT NULL,
+            sabiduria INTEGER NOT NULL,
+            carisma INTEGER NOT NULL,
+            iniciativa TEXT NOT NULL,
+            velocidad TEXT NOT NULL,
+            competencia TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+        )
+    """)
+
+    await _connection.execute("""
+        CREATE TABLE IF NOT EXISTS ficha_clases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            clase TEXT NOT NULL,
+            nivel INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+        )
+    """)
+
+    await _connection.execute("""
+        CREATE TABLE IF NOT EXISTS ficha_rasgos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            nombre TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+        )
+    """)
+
+    await _connection.execute("""
+        CREATE TABLE IF NOT EXISTS ficha_conjuros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            nombre TEXT NOT NULL,
+            nivel TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+        )
+    """)
+
+    # Para facilitar las actualizaciones estructurales
+    # Si la tabla ya existe y no tiene la columna 'origen', la agregamos dinámicamente.
+    try:
+        await _connection.execute("ALTER TABLE inventarios ADD COLUMN origen TEXT DEFAULT 'tienda'")
+    except Exception:
+        pass # La columna ya existe
 
     await _connection.commit()
     
@@ -422,10 +476,10 @@ async def migrar_catalogo_inicial(catalogo_base: dict):
             """, (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
     await _connection.commit()
 
-async def agregar_item_inventario(user_id: int, producto_nombre: str):
+async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: str = 'tienda'):
     """
     Suma 1 a la cantidad de un producto en el inventario del usuario.
-    Si no existe, lo crea.
+    Si no existe, lo crea. Origen puede ser 'tienda' o 'nivel20'.
     """
     async with _connection.execute(
         "SELECT id, cantidad FROM inventarios WHERE user_id = ? AND producto_nombre = ? COLLATE NOCASE",
@@ -434,15 +488,26 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str):
         row = await cursor.fetchone()
 
     if row:
-        nueva_cantidad = row["cantidad"] + 1
-        await _connection.execute("UPDATE inventarios SET cantidad = ? WHERE id = ?", (nueva_cantidad, row["id"]))
+        # Solo sumamos cantidad si NO proviene de la sincronización de Nivel20.
+        # Si origen == 'nivel20', solo etiquetamos el objeto sin duplicar cantidades.
+        if origen == 'nivel20':
+            await _connection.execute(
+                "UPDATE inventarios SET origen = ? WHERE id = ?",
+                (origen, row["id"])
+            )
+        else:
+            nueva_cantidad = row["cantidad"] + 1
+            await _connection.execute(
+                "UPDATE inventarios SET cantidad = ? WHERE id = ?",
+                (nueva_cantidad, row["id"])
+            )
     else:
-        await _connection.execute("INSERT INTO inventarios (user_id, producto_nombre, cantidad) VALUES (?, ?, 1)", (user_id, producto_nombre))
+        await _connection.execute("INSERT INTO inventarios (user_id, producto_nombre, cantidad, origen) VALUES (?, ?, 1, ?)", (user_id, producto_nombre, origen))
 
     await _connection.commit()
 
 async def obtener_inventario_usuario(user_id: int):
-    async with _connection.execute("SELECT id, producto_nombre, cantidad FROM inventarios WHERE user_id = ?", (user_id,)) as cursor:
+    async with _connection.execute("SELECT id, producto_nombre, cantidad, origen FROM inventarios WHERE user_id = ?", (user_id,)) as cursor:
         return await cursor.fetchall()
 
 async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
@@ -466,6 +531,77 @@ async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
 
     await _connection.commit()
     return True
+
+# --- LÓGICA DE FICHA NIVEL20 ---
+
+async def guardar_datos_ficha_nivel20(user_id: int, stats: dict):
+    """
+    Guarda o actualiza todos los datos extraídos de Nivel20.
+    stats es un dict con: fuerza, destreza, constitucion, inteligencia, sabiduria, carisma,
+    iniciativa, velocidad, competencia, clases (list de dicts), rasgos (list), conjuros (list de dicts), equipo (list)
+    """
+    # 1. Estadísticas Base
+    await _connection.execute("DELETE FROM ficha_estadisticas WHERE user_id = ?", (user_id,))
+    await _connection.execute("""
+        INSERT INTO ficha_estadisticas (user_id, fuerza, destreza, constitucion, inteligencia, sabiduria, carisma, iniciativa, velocidad, competencia)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id, stats.get('fuerza', 10), stats.get('destreza', 10), stats.get('constitucion', 10),
+        stats.get('inteligencia', 10), stats.get('sabiduria', 10), stats.get('carisma', 10),
+        stats.get('iniciativa', '+0'), stats.get('velocidad', '30 pies'), stats.get('competencia', '+2')
+    ))
+
+    # 2. Clases
+    await _connection.execute("DELETE FROM ficha_clases WHERE user_id = ?", (user_id,))
+    for c in stats.get('clases', []):
+        await _connection.execute("INSERT INTO ficha_clases (user_id, clase, nivel) VALUES (?, ?, ?)", (user_id, c['nombre'], c['nivel']))
+
+    # 3. Rasgos
+    await _connection.execute("DELETE FROM ficha_rasgos WHERE user_id = ?", (user_id,))
+    for r in stats.get('rasgos', []):
+        await _connection.execute("INSERT INTO ficha_rasgos (user_id, nombre) VALUES (?, ?)", (user_id, r))
+
+    # 4. Conjuros
+    await _connection.execute("DELETE FROM ficha_conjuros WHERE user_id = ?", (user_id,))
+    for conjuro in stats.get('conjuros', []):
+        await _connection.execute("INSERT INTO ficha_conjuros (user_id, nombre, nivel) VALUES (?, ?, ?)", (user_id, conjuro['nombre'], conjuro['nivel']))
+
+    # 5. Equipo (Marcando origen='nivel20')
+    # Nota: No borramos inventarios anteriores, solo insertamos nuevos.
+    # El usuario pidió no borrar, solo etiquetar.
+    for item in stats.get('equipo', []):
+        # Evitar duplicar el mismo item mil veces si corren el scan muchas veces.
+        # Check si ya tiene este item en nivel20:
+        async with _connection.execute(
+            "SELECT id FROM inventarios WHERE user_id = ? AND producto_nombre = ? COLLATE NOCASE AND origen = 'nivel20'",
+            (user_id, item)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                # Si no lo tiene marcado como nivel20, lo agregamos (o actualizamos si lo compró en tienda).
+                await agregar_item_inventario(user_id, item, origen='nivel20')
+
+    await _connection.commit()
+
+async def obtener_datos_ficha_completos(user_id: int):
+    """Devuelve un diccionario con todas las estadísticas vinculadas."""
+    datos = {}
+    async with _connection.execute("SELECT * FROM ficha_estadisticas WHERE user_id = ?", (user_id,)) as cursor:
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        datos['estadisticas'] = dict(row)
+
+    async with _connection.execute("SELECT clase, nivel FROM ficha_clases WHERE user_id = ?", (user_id,)) as cursor:
+        datos['clases'] = [dict(r) for r in await cursor.fetchall()]
+
+    async with _connection.execute("SELECT nombre FROM ficha_rasgos WHERE user_id = ?", (user_id,)) as cursor:
+        datos['rasgos'] = [r['nombre'] for r in await cursor.fetchall()]
+
+    async with _connection.execute("SELECT nombre, nivel FROM ficha_conjuros WHERE user_id = ?", (user_id,)) as cursor:
+        datos['conjuros'] = [dict(r) for r in await cursor.fetchall()]
+
+    return datos
 
 # --- HERRAMIENTAS DE CONTROL FISCAL (INCAUTACIÓN) ---
 

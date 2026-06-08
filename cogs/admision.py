@@ -6,6 +6,7 @@ import config
 import database  # Consumo exclusivo del pool de persistencia centralizado
 import re
 import asyncio
+from utils.nivel20_scraper import extraer_datos_nivel20
 
 class SelectLadder(discord.ui.Select):
     """Menú de selección interactivo para conmutar las pestañas del Ladder."""
@@ -114,6 +115,18 @@ class ConfirmacionRegistro(discord.ui.View):
             self.datos["estatura"], 
             self.datos["link"]
         )
+
+        # ----------------------------------------------------
+        # NUEVO FLUJO: Extracción Automática en la Admisión
+        # ----------------------------------------------------
+        link_nivel20 = self.datos["link"].strip()
+        if link_nivel20.startswith("http"):
+            try:
+                datos_extraidos = await extraer_datos_nivel20(link_nivel20)
+                if datos_extraidos:
+                    await database.guardar_datos_ficha_nivel20(self.usuario_target.id, datos_extraidos)
+            except Exception as e:
+                print(f"Error extrayendo datos en registro para {self.usuario_target.name}: {e}")
 
         rol_aventurero = interaction.guild.get_role(config.ROL_AVENTURERO)
         rol_viajero = interaction.guild.get_role(config.ROL_VIAJERO)
@@ -349,6 +362,66 @@ class AdmisionCog(commands.Cog):
         
         await ctx.send(embed=embed, view=LadderView())
         await ctx.respond("✅ El panel dinámico del Ladder ha sido inicializado con éxito.", ephemeral=True)
+
+    @commands.slash_command(name="escanear_ficha", description="[STAFF] Extrae y sincroniza la hoja de personaje de Nivel20.")
+    async def escanear_ficha(self, ctx: discord.ApplicationContext, link_nivel20: discord.Option(str, "Link de la ficha en Nivel20 (https://nivel20.com/...)"), usuario: discord.Option(discord.Member, "Jugador al que pertenece (por defecto tú)", required=False) = None):
+        """Herramienta de diagnóstico e importación manual para leer Nivel20."""
+        # Restricción de Staff
+        if not any(rol.id in config.ROLES_APROBACION for rol in ctx.user.roles):
+            await ctx.respond("❌ Solo los Oficiales pueden ejecutar escaneos manuales.", ephemeral=True)
+            return
+
+        target_user = usuario or ctx.user
+
+        await ctx.defer() # Porque el scraping puede tardar unos segundos
+
+        # 1. Scraping
+        datos_extraidos = await extraer_datos_nivel20(link_nivel20)
+        if not datos_extraidos:
+            await ctx.followup.send("❌ Error al intentar leer la ficha de Nivel20. Revisa que el enlace sea correcto y la ficha sea pública.")
+            return
+
+        # 2. Guardar en Base de Datos de forma persistente
+        # Solo lo guardamos si el usuario ya existe en "aventureros" para no romper Foreign Keys.
+        ficha_existente = await database.obtener_personaje(target_user.id)
+        if not ficha_existente:
+             await ctx.followup.send(f"⚠️ El usuario {target_user.mention} no está registrado como Aventurero en la base de datos central. ¡No se pudo guardar la sincronización! Deberían pasar por el ticket primero.")
+             return
+
+        await database.guardar_datos_ficha_nivel20(target_user.id, datos_extraidos)
+
+        # 3. Formateo y Resumen del Reporte
+        embed = discord.Embed(
+            title="🔍 FICHA ESCANEADA Y SINCRONIZADA",
+            description=f"Datos extraídos exitosamente de Nivel20 para {target_user.mention}.",
+            color=discord.Color.green()
+        )
+
+        # Stats
+        stats_str = (
+            f"**FUE:** {datos_extraidos['fuerza']} | **DES:** {datos_extraidos['destreza']} | **CON:** {datos_extraidos['constitucion']}\n"
+            f"**INT:** {datos_extraidos['inteligencia']} | **SAB:** {datos_extraidos['sabiduria']} | **CAR:** {datos_extraidos['carisma']}\n"
+            f"**Iniciativa:** {datos_extraidos['iniciativa']} | **Velocidad:** {datos_extraidos['velocidad']} | **Competencia:** {datos_extraidos['competencia']}"
+        )
+        embed.add_field(name="Atributos de Combate", value=stats_str, inline=False)
+
+        # Clases
+        clases_str = "\n".join([f"• {c['nombre']} (Nv. {c['nivel']})" for c in datos_extraidos['clases']]) or "Ninguna detectada"
+        embed.add_field(name="Clases", value=clases_str, inline=True)
+
+        # Conjuros
+        conjuros_str = "\n".join([f"• {s['nombre']} ({s['nivel']})" for s in datos_extraidos['conjuros']])
+        if len(conjuros_str) > 1000:
+            conjuros_str = conjuros_str[:1000] + "\n... (Y más)"
+        embed.add_field(name="Conjuros", value=conjuros_str or "Ninguno detectado", inline=True)
+
+        # Equipo
+        equipo_str = "\n".join([f"• {i}" for i in datos_extraidos['equipo']])
+        if len(equipo_str) > 1000:
+            equipo_str = equipo_str[:1000] + "\n... (Y más)"
+        embed.add_field(name="Inventario Sincronizado", value=equipo_str or "Vacío", inline=False)
+
+        await ctx.followup.send(embed=embed)
 
     @commands.slash_command(name="setup_admision", description="[STAFF] Despliega el botón fijo para la apertura de tickets de admisión.")
     async def setup_admision(self, ctx: discord.ApplicationContext):
