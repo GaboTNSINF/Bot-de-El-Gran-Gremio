@@ -120,6 +120,29 @@ async def init_db():
         )
     """)
 
+    # 8. Tabla de Productos de la Tienda
+    await _connection.execute("""
+        CREATE TABLE IF NOT EXISTS tienda_productos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL COLLATE NOCASE,
+            precio_str TEXT NOT NULL,
+            costo_pc INTEGER NOT NULL,
+            categoria TEXT NOT NULL,
+            descripcion TEXT NOT NULL
+        )
+    """)
+
+    # 9. Tabla de Inventario de Usuarios
+    await _connection.execute("""
+        CREATE TABLE IF NOT EXISTS inventarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            producto_nombre TEXT NOT NULL,
+            cantidad INTEGER DEFAULT 1,
+            FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+        )
+    """)
+
     await _connection.commit()
     
     # Inyección Inicial del Fondo de Reserva Maestro (1,000 pp = 1,000,000 pc)
@@ -363,6 +386,86 @@ async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
     await _connection.execute("UPDATE cuentas_bancarias SET balance_pc = balance_pc + ? WHERE id_entidad = ?", (cantidad_pc, receptor_id))
     await _connection.commit()
     return True  
+
+# --- TIENDA E INVENTARIOS ---
+
+async def obtener_catalogo():
+    # NOTA EDUCATIVA: Retornamos todos los productos para reconstruir el catálogo en memoria.
+    async with _connection.execute("SELECT nombre, precio_str, costo_pc, categoria, descripcion FROM tienda_productos") as cursor:
+        return await cursor.fetchall()
+
+async def agregar_producto_db(nombre: str, precio_str: str, costo_pc: int, categoria: str, descripcion: str):
+    await _connection.execute("""
+        INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
+        VALUES (?, ?, ?, ?, ?)
+    """, (nombre, precio_str, costo_pc, categoria, descripcion))
+    await _connection.commit()
+
+async def eliminar_producto_db(nombre: str) -> bool:
+    async with _connection.execute("DELETE FROM tienda_productos WHERE nombre = ? COLLATE NOCASE", (nombre,)) as cursor:
+        exito = cursor.rowcount > 0
+    await _connection.commit()
+    return exito
+
+async def migrar_catalogo_inicial(catalogo_base: dict):
+    """Inserta el catálogo inicial por defecto si la tienda está vacía."""
+    async with _connection.execute("SELECT COUNT(*) as cuenta FROM tienda_productos") as cursor:
+        row = await cursor.fetchone()
+        if row and row["cuenta"] > 0:
+            return  # Ya hay productos, no migrar
+
+    for categoria, items in catalogo_base.items():
+        for item in items:
+            await _connection.execute("""
+                INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
+                VALUES (?, ?, ?, ?, ?)
+            """, (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
+    await _connection.commit()
+
+async def agregar_item_inventario(user_id: int, producto_nombre: str):
+    """
+    Suma 1 a la cantidad de un producto en el inventario del usuario.
+    Si no existe, lo crea.
+    """
+    async with _connection.execute(
+        "SELECT id, cantidad FROM inventarios WHERE user_id = ? AND producto_nombre = ? COLLATE NOCASE",
+        (user_id, producto_nombre)
+    ) as cursor:
+        row = await cursor.fetchone()
+
+    if row:
+        nueva_cantidad = row["cantidad"] + 1
+        await _connection.execute("UPDATE inventarios SET cantidad = ? WHERE id = ?", (nueva_cantidad, row["id"]))
+    else:
+        await _connection.execute("INSERT INTO inventarios (user_id, producto_nombre, cantidad) VALUES (?, ?, 1)", (user_id, producto_nombre))
+
+    await _connection.commit()
+
+async def obtener_inventario_usuario(user_id: int):
+    async with _connection.execute("SELECT id, producto_nombre, cantidad FROM inventarios WHERE user_id = ?", (user_id,)) as cursor:
+        return await cursor.fetchall()
+
+async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
+    """
+    Resta 1 a la cantidad del producto. Si llega a 0, se elimina del inventario.
+    Retorna True si se pudo usar (existía y había stock), False de lo contrario.
+    """
+    async with _connection.execute(
+        "SELECT id, cantidad FROM inventarios WHERE user_id = ? AND producto_nombre = ? COLLATE NOCASE",
+        (user_id, producto_nombre)
+    ) as cursor:
+        row = await cursor.fetchone()
+
+    if not row:
+        return False
+
+    if row["cantidad"] > 1:
+        await _connection.execute("UPDATE inventarios SET cantidad = cantidad - 1 WHERE id = ?", (row["id"],))
+    else:
+        await _connection.execute("DELETE FROM inventarios WHERE id = ?", (row["id"],))
+
+    await _connection.commit()
+    return True
 
 # --- HERRAMIENTAS DE CONTROL FISCAL (INCAUTACIÓN) ---
 
