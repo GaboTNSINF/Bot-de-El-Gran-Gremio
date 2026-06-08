@@ -4,44 +4,34 @@ import discord
 from discord.ext import commands
 import json
 
-# NOTA EDUCATIVA: En un proyecto grande, los objetos de la tienda cambian constantemente.
-# En lugar de hardcodearlos en el código (y tener que reiniciar el bot para añadir una poción),
-# es mejor tener un pequeño diccionario que podamos organizar por categorías.
-CATALOGO_TIENDA = {
-    "armas": [
-        {"nombre": "Daga", "precio": "2 po", "costo_pc": 200, "desc": "Daño 1d4 perforante. Sutil y fácil de ocultar."},
-        {"nombre": "Espada Corta", "precio": "10 po", "costo_pc": 1000, "desc": "Daño 1d6 cortante. Ligera y versátil."},
-        {"nombre": "Espada Larga", "precio": "15 po", "costo_pc": 1500, "desc": "Daño 1d8 cortante (1d10 a dos manos)."},
-        {"nombre": "Arco Largo", "precio": "50 po", "costo_pc": 5000, "desc": "Daño 1d8 perforante. Rango 150/600 pies."}
-    ],
-    "armaduras": [
-        {"nombre": "Cuero", "precio": "10 po", "costo_pc": 1000, "desc": "CA 11 + mod. Destreza. Ligera."},
-        {"nombre": "Camisa de Mallas", "precio": "50 po", "costo_pc": 5000, "desc": "CA 13 + mod. Destreza (máx 2). Media."},
-        {"nombre": "Placas", "precio": "1,500 po", "costo_pc": 150000, "desc": "CA 18. Pesada. Requiere Fuerza 15."}
-    ],
-    "consumibles": [
-        {"nombre": "Poción de Curación", "precio": "50 po", "costo_pc": 5000, "desc": "Restaura 2d4+2 puntos de golpe."},
-        {"nombre": "Raciones (1 día)", "precio": "5 pp", "costo_pc": 50, "desc": "Comida básica para sobrevivir."},
-        {"nombre": "Antorcha", "precio": "1 pc", "costo_pc": 1, "desc": "Brinda luz brillante por 20 pies."}
-    ]
-}
+import database
+from config import ROLES_EDICION_MATRICULA
 
 class SelectCategoriaTienda(discord.ui.Select):
-    """Menú desplegable para navegar el catálogo sin hacer spam en el chat."""
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="Armería (Armas)", description="Espadas, arcos, hachas y más.", emoji="⚔️", value="armas"),
-            discord.SelectOption(label="Herrería (Armaduras)", description="Defensa ligera, media y pesada.", emoji="🛡️", value="armaduras"),
-            discord.SelectOption(label="Bazar (Consumibles)", description="Pociones, raciones y utilidades.", emoji="🧪", value="consumibles")
-        ]
+    """Menú desplegable para navegar el catálogo dinámico desde la BD."""
+    def __init__(self, categorias_disponibles: list):
+        # NOTA EDUCATIVA: Generamos las opciones dinámicamente según las categorías que existan en la BD.
+        options = []
+        for cat in categorias_disponibles:
+            # Agregamos emojis por defecto dependiendo de la categoría si es conocida
+            emoji = "📦"
+            if cat.lower() == "armas": emoji = "⚔️"
+            elif cat.lower() == "armaduras": emoji = "🛡️"
+            elif cat.lower() == "consumibles": emoji = "🧪"
+
+            options.append(discord.SelectOption(label=cat.capitalize(), value=cat, emoji=emoji))
+
         super().__init__(placeholder="Abre el catálogo gremial...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         # BLINDAJE: Defer instantáneo para que la interacción no caduque.
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
 
         categoria_elegida = self.values[0]
-        items = CATALOGO_TIENDA[categoria_elegida]
+        catalogo_completo = await database.obtener_catalogo()
+
+        # Filtramos los items de la base de datos por la categoría seleccionada
+        items = [item for item in catalogo_completo if item["categoria"].lower() == categoria_elegida.lower()]
 
         embed = discord.Embed(
             title=f"🏪 CATÁLOGO GREMIAL: {categoria_elegida.upper()}",
@@ -51,19 +41,19 @@ class SelectCategoriaTienda(discord.ui.Select):
 
         for item in items:
             embed.add_field(
-                name=f"🛒 {item['nombre']} — **{item['precio']}**",
-                value=f"*{item['desc']}*\n(Comprar: `/comprar \"{item['nombre']}\"`)",
+                name=f"🛒 {item['nombre']} — **{item['precio_str']}**",
+                value=f"*{item['descripcion']}*\n(Comprar: `/comprar \"{item['nombre']}\"`)",
                 inline=False
             )
 
         embed.set_footer(text="Anota el nombre exacto del objeto para usar el comando /comprar")
-        await interaction.edit_original_response(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class TiendaView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, categorias: list):
         super().__init__(timeout=300)
-        self.add_item(SelectCategoriaTienda())
+        self.add_item(SelectCategoriaTienda(categorias))
 
 
 class TiendaCog(commands.Cog):
@@ -74,57 +64,128 @@ class TiendaCog(commands.Cog):
     async def tienda(self, ctx: discord.ApplicationContext):
         # NOTA EDUCATIVA: Al usar ephemeral=True, el jugador puede ver el menú sin inundar el canal
         # de rol donde los demás están escribiendo.
+        catalogo = await database.obtener_catalogo()
+        if not catalogo:
+            await ctx.respond("❌ **La tienda está vacía actualmente.** Los administradores aún no han añadido productos.", ephemeral=True)
+            return
+
+        # Extraemos las categorías únicas disponibles en el catálogo
+        categorias = list(set(item["categoria"] for item in catalogo))
+
         embed = discord.Embed(
             title="🏪 BIENVENIDO A LA TIENDA DEL GREMIO",
-            description="Selecciona una categoría en el menú inferior para ver nuestros productos.\n\n*Nota: Cuando sepas qué quieres, usa `/comprar <objeto>` para que se te deduzca el oro.*",
+            description="Selecciona una categoría en el menú inferior para ver nuestros productos.\n\n*Nota: Cuando sepas qué quieres, usa `/comprar <objeto>` para que se te deduzca el oro y se guarde en tu inventario.*",
             color=discord.Color.dark_gold()
         )
-        await ctx.respond(embed=embed, view=TiendaView(), ephemeral=True)
+        await ctx.respond(embed=embed, view=TiendaView(categorias), ephemeral=True)
 
     @commands.slash_command(name="comprar", description="Adquiere un objeto de la tienda pagando con tus fondos gremiales.")
     async def comprar(self, ctx: discord.ApplicationContext, objeto: discord.Option(str, "Escribe el nombre del objeto tal cual sale en la /tienda")):
-        # Buscar el objeto en todas las categorías de forma insensible a mayúsculas
-        objeto_buscado = objeto.lower().strip()
-        item_encontrado = None
+        await ctx.response.defer(ephemeral=True)
 
-        for categoria in CATALOGO_TIENDA.values():
-            for item in categoria:
-                if item["nombre"].lower() == objeto_buscado:
-                    item_encontrado = item
-                    break
-            if item_encontrado:
+        # Buscar el objeto en la base de datos de forma insensible a mayúsculas
+        objeto_buscado = objeto.lower().strip()
+        catalogo = await database.obtener_catalogo()
+
+        item_encontrado = None
+        for item in catalogo:
+            if item["nombre"].lower() == objeto_buscado:
+                item_encontrado = item
                 break
 
         if not item_encontrado:
-            await ctx.respond(f"❌ **El objeto `{objeto}` no existe en el catálogo.** Escribe `/tienda` para revisar los nombres exactos.", ephemeral=True)
+            await ctx.followup.send(f"❌ **El objeto `{objeto}` no existe en el catálogo.** Escribe `/tienda` para revisar los nombres exactos.", ephemeral=True)
             return
 
-        # NOTA EDUCATIVA: Importamos 'database' aquí para evitar dependencias circulares complejas al inicio
-        import database
-
         costo_cobre = item_encontrado["costo_pc"]
-
-        await ctx.response.defer()
 
         # BLINDAJE DE ECONOMÍA: Usamos transferir_fondos (id 0 = Bóveda Central)
         # Esto deduce el oro atómicamente. Si el jugador no tiene dinero, retorna False.
         exito = await database.transferir_fondos(ctx.user.id, 0, costo_cobre)
 
         if not exito:
-            await ctx.followup.send(f"❌ **Fondos Insuficientes:** No tienes las `{item_encontrado['precio']}` necesarias para comprar el objeto `{item_encontrado['nombre']}`.", ephemeral=True)
+            await ctx.followup.send(f"❌ **Fondos Insuficientes:** No tienes las `{item_encontrado['precio_str']}` necesarias para comprar el objeto `{item_encontrado['nombre']}`.", ephemeral=True)
             return
 
-        # Si la compra fue exitosa, emitimos un recibo público para la transparencia del Gremio
+        # Guardar en el inventario
+        await database.agregar_item_inventario(ctx.user.id, item_encontrado["nombre"])
+
+        # Si la compra fue exitosa, emitimos un recibo PRIVADO para no inundar el chat
         embed_recibo = discord.Embed(
             title="🧾 COMPROBANTE DE COMPRA OFICIAL",
-            description=f"El aventurero {ctx.user.mention} ha adquirido suministros en las tiendas del Gremio.",
+            description=f"Has adquirido suministros en las tiendas del Gremio.",
             color=discord.Color.green()
         )
         embed_recibo.add_field(name="🎒 Objeto Adquirido", value=f"**{item_encontrado['nombre']}**", inline=True)
-        embed_recibo.add_field(name="💰 Importe Pagado", value=f"`{item_encontrado['precio']}`", inline=True)
-        embed_recibo.set_footer(text="Los fondos han sido depositados en la Bóveda Central. ¡No olvides anotar el objeto en tu ficha!")
+        embed_recibo.add_field(name="💰 Importe Pagado", value=f"`{item_encontrado['precio_str']}`", inline=True)
+        embed_recibo.set_footer(text="El objeto ha sido añadido a tu inventario. ¡Usa /inventario para verlo!")
 
-        await ctx.followup.send(embed=embed_recibo)
+        await ctx.followup.send(embed=embed_recibo, ephemeral=True)
+
+        # NOTA EDUCATIVA: Enviar log silencioso a auditoría financiera
+        from config import CANAL_BUZON_SECRETARIA # Reutilizando un canal de log interno, idealmente el de auditoría
+        # Para cumplir con "Administrative and financial actions must be silently logged to 1513250885730570442"
+        log_channel = self.bot.get_channel(1513250885730570442)
+        if log_channel:
+            await log_channel.send(f"💸 [TIENDA] {ctx.user.mention} compró `{item_encontrado['nombre']}` por {item_encontrado['precio_str']}.")
+
+    @commands.slash_command(name="agregar_producto", description="[ADMIN] Añade un nuevo producto al catálogo de la tienda.")
+    async def agregar_producto(self, ctx: discord.ApplicationContext,
+                               nombre: discord.Option(str, "Nombre del producto"),
+                               precio_cantidad: discord.Option(int, "Cantidad de la moneda (ej: 15)"),
+                               precio_moneda: discord.Option(str, "Tipo de moneda", choices=["Oro (po)", "Plata (pp)", "Cobre (pc)"]),
+                               categoria: discord.Option(str, "Categoría", choices=["Armas", "Armaduras", "Consumibles", "Magia", "Otro"]),
+                               descripcion: discord.Option(str, "Breve descripción del item")):
+
+        # BLINDAJE: Verificación de permisos
+        if not any(role.id in ROLES_EDICION_MATRICULA for role in ctx.user.roles):
+            await ctx.respond("❌ **Acceso Denegado:** Solo la Alta Dirección puede modificar el catálogo de la tienda.", ephemeral=True)
+            return
+
+        if precio_cantidad <= 0:
+            await ctx.respond("❌ **Error:** El precio debe ser mayor a 0.", ephemeral=True)
+            return
+
+        await ctx.response.defer(ephemeral=True)
+
+        # Conversión a PC
+        costo_pc = precio_cantidad
+        precio_str = f"{precio_cantidad} "
+        if precio_moneda == "Oro (po)":
+            costo_pc *= 100
+            precio_str += "po"
+        elif precio_moneda == "Plata (pp)":
+            costo_pc *= 10
+            precio_str += "pp"
+        else:
+            precio_str += "pc"
+
+        # Revisar si ya existe
+        catalogo = await database.obtener_catalogo()
+        for item in catalogo:
+            if item["nombre"].lower() == nombre.lower():
+                await ctx.followup.send(f"❌ **Error:** El producto `{nombre}` ya existe en la tienda.", ephemeral=True)
+                return
+
+        # Insertar a la base de datos
+        await database.agregar_producto_db(nombre, precio_str, costo_pc, categoria, descripcion)
+
+        await ctx.followup.send(f"✅ **Producto Añadido:** `{nombre}` se agregó a la categoría **{categoria}** por **{precio_str}**.", ephemeral=True)
+
+    @commands.slash_command(name="eliminar_producto", description="[ADMIN] Elimina un producto del catálogo de la tienda.")
+    async def eliminar_producto(self, ctx: discord.ApplicationContext, nombre: discord.Option(str, "Nombre exacto del producto a eliminar")):
+        # BLINDAJE: Verificación de permisos
+        if not any(role.id in ROLES_EDICION_MATRICULA for role in ctx.user.roles):
+            await ctx.respond("❌ **Acceso Denegado:** Solo la Alta Dirección puede modificar el catálogo de la tienda.", ephemeral=True)
+            return
+
+        await ctx.response.defer(ephemeral=True)
+
+        exito = await database.eliminar_producto_db(nombre)
+        if exito:
+            await ctx.followup.send(f"✅ **Producto Eliminado:** `{nombre}` ha sido retirado de la tienda.", ephemeral=True)
+        else:
+            await ctx.followup.send(f"❌ **Error:** No se encontró ningún producto llamado `{nombre}`.", ephemeral=True)
 
 def setup(bot):
     bot.add_cog(TiendaCog(bot))
