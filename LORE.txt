@@ -1,0 +1,157 @@
+# 📌 REGLAS DE ORO DE ASTERIA: PILARES DE GOBERNANZA MUNDIAL
+
+Este documento contiene los tres ejes estructurales e inmutables para el desarrollo, dirección y validación de sesiones en el servidor. Ningún miembro del staff, administrador o Director de Juego (DM) está exento de su cumplimiento.
+
+---
+
+### ⚖️ LEY I: CONTROL ECONÓMICO POR NIVEL (HARD CAPS AUTOMATIZADOS)
+El balance mecánico prima sobre la narrativa. Los Directores de Juego no tienen la facultad de inventar recompensas, oro o rarezas de objetos fuera de los límites matemáticos calculados por el bot para el nivel exacto de los jugadores. 
+
+**Acceso de Dirección por Rango de DM:**
+*   **DM Aprendiz:** Autorizado para dirigir mesas de **Nivel 1 a 2**.
+*   **DM Experto:** Autorizado para dirigir mesas de **Nivel 3 a 10**.
+*   **DM Oficial:** Autorizado para dirigir mesas de **Nivel 11 a 20**.
+
+**Matriz Máxima de Recompensas por Personaje (Por Sesión):**
+*   **Nivel 1:** Max 15 po | Consumible Común | Sin objetos permanentes.
+*   **Nivel 2:** Max 30 po | Consumible Común | Sin objetos permanentes.
+*   **Nivel 3:** Max 50 po | Consumible Poco Común | Objeto Permanente Común.
+*   **Nivel 4:** Max 75 po | Consumible Poco Común | Objeto Permanente Común.
+*   **Nivel 5:** Max 120 po | Consumible Poco Común | Objeto Permanente Poco Común.
+*   **Nivel 6:** Max 160 po | Consumible Poco Común | Objeto Permanente Poco Común.
+*   **Nivel 7:** Max 200 po | Consumible Poco Común | Objeto Permanente Poco Común.
+*   **Nivel 8:** Max 250 po | Consumible Raro | Objeto Permanente Poco Común.
+*   **Nivel 9:** Max 300 po | Consumible Raro | Objeto Permanente Poco Común.
+*   **Nivel 10:** Max 350 po | Consumible Raro | Objeto Permanente Raro (Requiere Autorización).
+*   **Nivel 11 a 15:** Max 450 po a 900 po (Escalado) | Consumible Raro/Muy Raro | Objeto Permanente Raro.
+*   **Nivel 16 a 20:** Max 1100 po a 4000 po (Escalado) | Consumible Muy Raro/Legendario | Objeto Permanente Muy Raro/Legendario.
+
+> 🚫 *El bot bloqueará automáticamente cualquier reporte de sesión que intente ingresar valores superiores a esta tabla según el nivel de los asistentes.*
+
+---
+
+### 🗺️ LEY II: JURISDICCIÓN NARRATIVA TERRITORIAL (ZONIFICACIÓN DEL MAPA)
+El mapa de Asteria está dividido por niveles de soberanía legal. La autoridad creativa de un DM está estrictamente delimitada por la zona geográfica donde ejecuta la sesión:
+
+1.  **Zonas de Instancia (Libertad Absoluta):** Mazmorras, ruinas aisladas y áreas salvajes inexploradas. El DM puede moldear el terreno, la historia y los peligros a discreción. Al cerrar la sesión, los cambios geográficos se consideran concluidos y no alteran la macro-geografía del continente.
+2.  **Zonas de Impacto Local (Monitoreadas):** Aldeas, pueblos periféricos y rutas comerciales menores. Los DMs pueden interactuar con la política local y crear NPCs rústicos, siempre que reporten los cambios ambientales al bot y estos no contradigan las directrices del Gran Gremio.
+3.  **Nodos Estatales (Inmutables):** Puerto Aurora y sedes principales. **Ningún DM puede alterar el entorno, herir NPCs clave o declarar estados de emergencia en estas zonas.** El lore y los eventos de estos nodos son exclusivos de la administración central.
+
+---
+
+### 🤖 LEY III: AUTOMATIZACIÓN OPERATIVA PROACTIVA (FILTRO DEL BOT)
+La gobernanza del servidor se ejecuta de forma proactiva mediante código, eliminando las evaluaciones subjetivas de comités humanos después de las sesiones.
+
+*   El comando `/reportar_sesion` no es un canal de texto libre; es un formulario de datos cuantitativos cerrados.
+*   Si los datos introducidos por el DM (oro, nivel, objetos, ubicación) cumplen con las matrices de las Leyes I y II, el bot procesa y canoniza la sesión de forma autónoma e instantánea.
+*   La intervención humana del staff queda restringida exclusivamente a las alertas de anomalías (flags) que el propio bot detecte cuando un parámetro sea vulnerado.
+
+# 🔮 EL COMBUSTIBLE DE ASTERIA: EL ECOSISTEMA MINERAL
+
+La tecnología Arcano-Punk en Asteria no está limitada por el ingenio de los mortales, sino por la escasez y la resistencia térmica de los minerales necesarios para contener y canalizar la energía mágica. El mundo se rige bajo dos combustibles arqueológicos:
+
+---
+
+### 💎 1. LOS FRAGMENTOS ASTRALES (El Recurso Soberano)
+Son las únicas piedras puras capaces de canalizar y soportar energía arcana masiva de forma permanente sin fracturarse ni degradarse.
+
+*   **Disponibilidad:** Extremadamente escasos. Su extracción mediante minería profunda requiere inversiones masivas de tiempo y oro (rendimiento estimado: solo 5 piedras aptas al año en todo el continente).
+*   **Uso Mecánico:** Es el componente central obligatorio para la forja de cualquier objeto mágico permanente de rareza *Poco Común* o superior (armas rúnicas, motores cinéticos, fuentes de energía autónomas).
+*   **Geopolítica:** El Gran Gremio mantiene un monopolio absoluto sobre su custodia en Puerto Aurora. Poseer un fragmento sin registrar es un delito federal.
+
+---
+
+### 🧪 2. LOS CRISTALES DE RESONANCIA (El Recurso Volátil)
+Minerales traslúcidos relativamente comunes que absorben frecuencias mágicas con facilidad, pero sufren de fatiga material severa.
+
+*   **Uso Mecánico:** Limitados estrictamente a la creación de objetos consumibles o temporales (pociones, piedras de luz de 24 horas, cartuchos rúnicos de un solo uso).
+*   **⚠️ LEY DE INESTABILIDAD COLECTIVA:** Los Cristales de Resonancia no pueden ser utilizados en masa para sustituir a un Fragmento Astral. Si se intentan conectar más de 3 cristales en un mismo mecanismo, la acumulación de calor mágico satura el mineral y provoca una **detonación arcana destructiva instantánea**.
+
+> 📜 *Intentar construir tecnología permanente o vehículos utilizando Cristales de Resonancia comunes es considerado negligencia criminal dentro de la jurisdicción del Gremio debido al riesgo de explosión.*
+
+# 🔨 EL PROTOCOLO DE FORJA RÚNICA
+
+Para que la creación de tecnología Arcano-Punk (como carruajes rúnicos o autómatas) sea válida y registrada por el bot del servidor, el personaje debe cumplir con el triple candado de manufactura de forma obligatoria:
+
+---
+
+### 🧠 1. COGNICIÓN MATERIAL (El Saber Técnico)
+Manipular Fragmentos Astrales requiere un conocimiento académico avanzado que no puede ser improvisado ni justificado únicamente por trasfondo (*backstory*).
+*   **Requisito de Hoja:** El personaje debe poseer competencia (*proficiency*) obligatoria en la habilidad de **Arcanismo (Arcana)** Y en las **Herramientas de Joyero** o **Herramientas de Herrero**.
+*   **El Umbral:** Toda manufactura rúnica exige una tirada de dados estática con una Dificultad Mínima de **CD 18**. Si el personaje carece de las competencias, el bot bloqueará el intento de forja.
+
+---
+
+### 🏗️ 2. INFRAESTRUCTURA ESTACIONARIA (Las Mesas de Sintonía)
+La energía rúnica no se puede moldear a la intemperie ni en campamentos portátiles.
+*   **Mesas de Sintonía Rúnica:** Estructuras masivas de piedra y plomo diseñadas para absorber el exceso de radiación mágica. Al inicio del servidor, **estas mesas solo existen físicamente dentro de los talleres del Gran Gremio en Puerto Aurora**. Los jugadores deben regresar obligatoriamente a la capital para craftear.
+*   **El Cincel de Resonancia:** Herramienta consumible de alto costo económico. Se desgasta y destruye tras un número fijo de usos, actuando como un drenador de oro constante para la economía de los artesanos.
+
+---
+
+### 📜 3. EL ELENCO DE RUNAS (Los Planos)
+Los personajes no pueden "inventar" runas de la nada. Cada runa es un algoritmo físico complejo que debe ser descubierto.
+*   **Planos Arqueológicos:** Para aprender una runa (Ej: *Runa de Locomoción Cinética I*), el personaje debe encontrar su plano físico como recompensa en una Zona de Instancia (mazmorra) o comprar la patente legal al Gremio por costos prohibitivos.
+*   **Registro del Bot:** El bot indexará las runas conocidas en el perfil del jugador. Si intentas ejecutar un comando de crafteo de una runa que tu personaje no ha aprendido formalmente, el bot cancelará la acción.
+
+
+
+------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------
+
+# 🗺️ LA GEOGRAFÍA DE ASTERIA: EL SISTEMA DE ANILLOS CONCÉNTRICOS
+
+En Asteria, la distancia no es una descripción narrativa; es un motor de juego activo, un drenador de recursos y una barrera de seguridad. El mapa del continente se divide formalmente en tres jurisdicciones espaciales concéntricas según su distancia respecto a Puerto Aurora.
+
+---
+
+### 🟢 ANILLO I: EL PERÍMETRO CIVIL (Seguridad Absoluta)
+*   **Alcance:** De 0 a 1 Jornada de viaje desde la capital (0 a 40 km).
+*   **Acceso de Dirección:** Exclusivo para **DM Aprendiz** (Mesas de Nivel 1-2).
+*   **Contexto:** Zonas agrícolas, granjas de subsistencia y minas menores de carbón o hierro. La presencia de las patrullas del Gran Gremio es constante y la influencia defensiva de los Custodios es total.
+*   **Mecánica de Viaje:** Costo de 1 po (raciones). No genera tiempo de bloqueo real en Discord. El riesgo de encuentros letales en caminos principales es del 0%.
+
+---
+
+### 🟡 ANILLO II: LA FRONTERA COMERCIAL (Riesgo Controlado)
+*   **Alcance:** De 2 a 4 Jornadas de viaje desde la capital (80 a 160 km).
+*   **Acceso de Dirección:** Exclusivo para **DM Experto** (Mesas de Nivel 3-10).
+*   **Contexto:** Ciudades periféricas intermedias, puestos avanzados del Gremio y centros de acopio de materias primas. Aquí comienzan a registrarse los primeros yacimientos inestables de *Cristales de Resonancia*.
+*   **Mecánica de Viaje:** Costo fijo de 5 po por jornada de viaje en la ficción. Riesgo de desgaste del 25% (exige 1 Tirada de Salvación de Constitución CD 12 por viaje; el fallo otorga 1 nivel de Extenuación).
+
+---
+
+### 🔴 ANILLO III: LOS YERMOS RÚNICOS (Tierra de Nadie)
+*   **Alcance:** De 5 a 10 Jornadas de viaje desde la capital (200 a 400 km).
+*   **Acceso de Dirección:** Exclusivo para **DM Oficial** (Mesas de Nivel 11-20).
+*   **Contexto:** Ruinas de civilizaciones colapsadas, cráteres de antiguas explosiones arcanas y ubicación exclusiva de los valiosos *Fragmentos Astrales*. La seguridad del Gremio es nula y la ley no existe.
+*   **Mecánica de Viaje:** Costo de 20 po por jornada de viaje. Riesgo de desgaste del 75% (exige 2 Tiradas de Salvación de Constitución CD 15; el fallo aplica niveles acumulativos de Extenuación). Tablas de encuentros aleatorios letales activas obligatoriamente.
+
+# ⏱️ PROTOCOLO LOGÍSTICO Y BLOQUEO TEMPORAL (LOCKOUT)
+
+Para evitar la incoherencia espacial de que un personaje extraiga recursos en los confines del mundo y al instante aparezca en la capital comerciando, el bot del servidor implementa las siguientes restricciones automatizadas de tiempo real y economía:
+
+---
+
+### ⏳ 1. EL ESTADO "VIAJANDO" (Bloqueo Post-Sesión)
+Al finalizar y registrar una sesión mediante el comando `/reportar_sesion`, el bot leerá la ubicación geográfica de la aventura y aplicará un congelamiento temporal a las hojas de los personajes participantes:
+
+*   **Partidas en Anillo I:** **0 horas** de bloqueo. El personaje puede volver a inscribirse en otra mesa de inmediato.
+*   **Partidas en Anillo II:** **12 horas reales** de bloqueo. El personaje queda incomunicado viajando de regreso por los caminos comerciales.
+*   **Partidas en Anillo III:** **36 horas reales** de bloqueo. El personaje no puede participar en ninguna otra mesa del servidor debido al agotador viaje de retorno a través de los yermos.
+
+---
+
+### 💰 2. LA VÁLVULA DE ESCAPE: RETORNO COMERCIAL DEL GREMIO
+Los jugadores que deseen omitir el bloqueo de tiempo real en Discord para poder jugar al día siguiente con otro DM, pueden contratar los servicios de las Caravanas Blindadas del Gran Gremio.
+
+*   **Mecánica:** Al finalizar la sesión, el jugador puede indicarle al bot que pagará la tarifa de **150 piezas de oro** de su recompensa actual.
+*   **Resultado:** El bot descuenta el oro automáticamente de su inventario y elimina el estado de bloqueo, permitiendo al personaje aparecer de forma instantánea en los muelles seguros de Puerto Aurora listo para una nueva aventura.
+
+> ⚠️ *Nota Administrativa: Este costo actúa como un regulador macroeconómico. Los niveles bajos no podrán costearlo, limitando su exposición al peligro, mientras que los niveles altos se verán obligados a gastar su oro excedente si desean optimizar su tiempo de juego real.*
+
+
+
+------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------
+
