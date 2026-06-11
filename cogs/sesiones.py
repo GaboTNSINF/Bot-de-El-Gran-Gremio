@@ -6,6 +6,7 @@ import config
 import database
 import random
 import asyncio
+import re
 
 class VistaEncuestaDM(discord.ui.View):
     """Botonera interactiva e inmune a reinicios que procesa las reseñas de satisfacción."""
@@ -80,8 +81,16 @@ class FormularioReporteSesion(discord.ui.Modal):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # Handshake inmediato para mitigar de raíz el error 10062 de expiración de la API de Discord
-        await interaction.response.defer(ephemeral=True)
+        # Explicación (Educativo): Interceptamos la expiración (error 10062 de Discord)
+        # Si un DM tarda más de 15 min en escribir su crónica, Discord caduca la sesión.
+        # Aquí envolvemos el 'defer' para capturar la excepción y no perder la crónica del DM.
+        interaccion_expirada = False
+        try:
+            # Handshake inmediato para dar más tiempo de proceso y evitar timeouts de 3s
+            await interaction.response.defer(ephemeral=True)
+        except discord.NotFound:
+            # La interacción caducó, marcamos el flag y proseguiremos rescatando el contenido.
+            interaccion_expirada = True
         
         guild = interaction.guild
         dm = interaction.user
@@ -90,7 +99,14 @@ class FormularioReporteSesion(discord.ui.Modal):
 
         canal_auditoria = guild.get_channel(config.CANAL_DISCUSION_SESIONES)
         if not canal_auditoria:
-            await interaction.followup.send("❌ Error: Canal de discusión de sesiones inaccesible. Verifica la ID en config.py.", ephemeral=True)
+            mensaje_error = "❌ Error: Canal de discusión de sesiones inaccesible. Verifica la ID en config.py."
+            if not interaccion_expirada:
+                await interaction.followup.send(mensaje_error, ephemeral=True)
+            else:
+                try:
+                    await dm.send(mensaje_error)
+                except discord.Forbidden:
+                    pass
             return
 
         aventura = self.children[0].value.strip()
@@ -101,9 +117,10 @@ class FormularioReporteSesion(discord.ui.Modal):
         miembros_detectados = []
         menciones_texto = []
         
-        # PROCESAMIENTO OPTIMIZADO EXCLUSIVO: Indexación O(N) local para búsquedas O(1)
-        # Reemplazamos guild.get_member_named() (que en pycord hace un escaneo lineal O(N) oculto por cada jugador)
-        # por un mapa local de hash generado en una sola pasada. (Optimización de Bolt ⚡)
+        # PROCESAMIENTO OPTIMIZADO EXCLUSIVO: Indexación O(N) local para búsquedas flexibles y tolerantes
+        # Explicación (Educativo): En lugar de coincidencias exactas, 'limpiamos' los strings quitando
+        # espacios y guiones bajos y los llevamos a minúsculas, lo que nos permite encontrar a "Dre Redgrave"
+        # aunque escriban "Dre_Redgrave" o "dre redgrave".
         mapa_miembros = None
 
         for p_name in jugadores_raw:
@@ -112,27 +129,42 @@ class FormularioReporteSesion(discord.ui.Modal):
                 continue
             
             member = None
-            # Intento de resolución 1: ID numérica directa (Hachazo rápido al caché de memoria)
-            if p_name.isdigit():
+
+            # Intento de resolución 1: Mención directa (ej. <@123456789>)
+            match_mencion = re.search(r'<@!?(\d+)>', p_name)
+            if match_mencion:
+                member = guild.get_member(int(match_mencion.group(1)))
+
+            # Intento de resolución 2: ID numérica directa (Hachazo rápido al caché de memoria)
+            if not member and p_name.isdigit():
                 member = guild.get_member(int(p_name))
             
-            # Intento de resolución 2: Búsqueda O(1) nativa local
+            # Intento de resolución 3: Búsqueda flexible local (Fuzzy matching optimizado)
             if not member:
                 if mapa_miembros is None:
-                    # Lazy loading: Solo construimos el índice O(N) si alguien usa un nombre en lugar de ID
+                    # Lazy loading: Construimos el índice O(N) normalizado
                     mapa_miembros = {}
                     for m in guild.members:
-                        mapa_miembros[m.name.lower()] = m
+                        nombres_posibles = [m.name]
                         if hasattr(m, 'global_name') and m.global_name:
-                            mapa_miembros[m.global_name.lower()] = m
+                            nombres_posibles.append(m.global_name)
                         if m.nick:
-                            mapa_miembros[m.nick.lower()] = m
+                            nombres_posibles.append(m.nick)
 
-                member = mapa_miembros.get(p_name.lower())
+                        for np in nombres_posibles:
+                            # Normalizamos quitando espacios y guiones bajos
+                            np_normalizado = re.sub(r'[\s_]+', '', np).lower()
+                            if np_normalizado not in mapa_miembros:
+                                mapa_miembros[np_normalizado] = m
+
+                # Normalizamos el término que el DM buscó
+                busqueda_normalizada = re.sub(r'[\s_]+', '', p_name).lower()
+                member = mapa_miembros.get(busqueda_normalizada)
 
             if member:
-                miembros_detectados.append(member)
-                menciones_texto.append(member.mention)
+                if member not in miembros_detectados:
+                    miembros_detectados.append(member)
+                    menciones_texto.append(member.mention)
             else:
                 menciones_texto.append(f"`{p_name}` (No encontrado)")
 
@@ -161,11 +193,26 @@ class FormularioReporteSesion(discord.ui.Modal):
         resultados = await asyncio.gather(*tareas, return_exceptions=True)
         votos_enviados = sum(1 for res in resultados if not isinstance(res, Exception))
 
-        await interaction.followup.send(
+        mensaje_exito = (
             f"✅ **Reporte Recibido (Folio #{folio}):** Datos asentados en el canal de coordinación.\n"
-            f"Se han disparado `{votos_enviados}` encuestas automáticas de satisfacción a los jugadores en paralelo.",
-            ephemeral=True
+            f"Se han disparado `{votos_enviados}` encuestas automáticas de satisfacción a los jugadores en paralelo."
         )
+
+        if not interaccion_expirada:
+            await interaction.followup.send(mensaje_exito, ephemeral=True)
+        else:
+            # Explicación (Educativo): Como la interacción caducó (Discord la cortó), no podemos
+            # responder por el canal del bot usando 'interaction'. En su lugar, mandamos un MD (DM)
+            # al Narrador para informarle que, aunque tardó mucho, no perdió su texto y todo salió bien.
+            try:
+                aviso_rescate = (
+                    f"⚠️ **Aviso del Sistema:** Tardaste más de 15 minutos en llenar el formulario y Discord cerró tu sesión... "
+                    f"¡Pero **hemos logrado rescatar tu reporte y procesarlo con éxito**! No has perdido nada de texto.\n\n"
+                    f"{mensaje_exito}"
+                )
+                await dm.send(aviso_rescate)
+            except discord.Forbidden:
+                pass
 
 
 class SesionesCog(commands.Cog):
