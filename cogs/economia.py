@@ -174,13 +174,14 @@ class EconomiaCog(commands.Cog):
                     (total_gasto_pc,)
                 )
 
-                # 3. Iterar inserciones con UPSERT y Lazy Init V3 (Optimizado)
+                # 3. Iterar inserciones seguras (Transacción Bifurcada Retrocompatible V6)
                 for user_id_str, monto in pagos_pendientes.items():
                     await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id_str,))
-                    await database._connection.execute("""
-                        INSERT INTO economia_billetera (user_id, balance_pc) VALUES (?, ?)
-                        ON CONFLICT(user_id) DO UPDATE SET balance_pc = balance_pc + excluded.balance_pc
-                    """, (user_id_str, monto))
+                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (user_id_str,))
+                    await database._connection.execute(
+                        "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
+                        (monto, user_id_str)
+                    )
 
         except Exception as e:
             await ctx.followup.send(f"❌ **Error Crítico de Dispersión:** {e}. Se ha ejecutado un Rollback automático.")
