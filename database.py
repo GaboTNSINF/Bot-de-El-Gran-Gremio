@@ -138,6 +138,17 @@ async def init_db():
         )
     """)
 
+    # Tabla de auditoría histórica independiente
+    await _connection.execute("""
+        CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
+            folio INTEGER PRIMARY KEY,
+            dm_id INTEGER NOT NULL,
+            timestamp INTEGER NOT NULL,
+            aventura TEXT NOT NULL,
+            recompensa_pc INTEGER NOT NULL
+        )
+    """)
+
     # SCHEMA V3 CANÓNICO ASTERIA: Inyectamos las nuevas tablas de infraestructura Trustless
     await _connection.executescript("""
         CREATE TABLE IF NOT EXISTS matriz_recompensas (
@@ -183,7 +194,7 @@ async def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS registro_recetas_conocidas (
-            user_id VARCHAR(30) NOT NULL,
+            user_id INTEGER NOT NULL,
             receta_id VARCHAR(50) NOT NULL,
             PRIMARY KEY (user_id, receta_id),
             FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
@@ -530,7 +541,7 @@ async def obtener_candidatos_compatibles_dm(dm_id: int, limite_jugadores: int):
 # --- INFRAESTRUCTURA CONTABLE ATÓMICA (ALTERNATIVAB) ---
 
 async def obtener_balance(id_entidad: int) -> int:
-    async with _connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (str(id_entidad),)) as cursor:
+    async with _connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (id_entidad,)) as cursor:
         resultado = await cursor.fetchone()
         return resultado["balance_pc"] if resultado else 0
 
@@ -825,6 +836,7 @@ async def embargo_masivo() -> int:
 async def cerrar_db():
     global _connection
     if _connection is not None:
-        await _connection.close()
-        _connection = None
+        async with db_lock:
+            await _connection.close()
+            _connection = None
         print("💾 [BANCO] Pool de conexiones persistentes cerrado de forma segura.")
