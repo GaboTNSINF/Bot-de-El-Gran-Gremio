@@ -118,20 +118,16 @@ class ModalRecompensasGlobales(discord.ui.Modal):
                         WHERE user_id = ?
                     """, (extenuacion_mod, j_str))
 
-                    # Inyectar PC a la billetera usando UPSERT
-                    await database._connection.execute("""
-                        INSERT INTO economia_billetera (user_id, balance_pc) VALUES (?, ?)
-                        ON CONFLICT(user_id) DO UPDATE SET balance_pc = balance_pc + excluded.balance_pc
-                    """, (j_str, pc_totales))
+                    # Inyectar PC a la billetera (Transacción Bifurcada Retrocompatible V6)
+                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (j_str,))
+                    await database._connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (pc_totales, j_str))
 
                     # Opcional: Inyectar ítem si se dio ID
                     if objeto_id:
                         # Limpiar ID (normalizar)
                         obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
-                        await database._connection.execute("""
-                            INSERT INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 1)
-                            ON CONFLICT(user_id, item_id) DO UPDATE SET cantidad = cantidad + 1
-                        """, (j_str, obj_norm))
+                        await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_str, obj_norm))
+                        await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_str, obj_norm))
         except Exception as e:
             await interaction.followup.send(f"❌ Error de base de datos durante la inyección atómica: {e}", ephemeral=True)
             return

@@ -208,19 +208,37 @@ async def init_db():
     # Bóveda Central (ID 0)
     await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES ('0');")
 
-    # Porteo de Economía In-Place a economia_billetera
+    # Porteo de Economía In-Place a economia_billetera (Transacción Bifurcada Retrocompatible)
     await _connection.execute("""
-        INSERT INTO economia_billetera (user_id, balance_pc)
-        SELECT CAST(id_entidad AS VARCHAR), balance_pc FROM cuentas_bancarias
-        ON CONFLICT(user_id) DO UPDATE SET balance_pc = balance_pc + excluded.balance_pc;
+        INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc)
+        SELECT CAST(id_entidad AS VARCHAR), 0 FROM cuentas_bancarias;
+    """)
+    await _connection.execute("""
+        UPDATE economia_billetera
+        SET balance_pc = balance_pc + (
+            SELECT balance_pc FROM cuentas_bancarias
+            WHERE CAST(id_entidad AS VARCHAR) = economia_billetera.user_id
+        )
+        WHERE user_id IN (SELECT CAST(id_entidad AS VARCHAR) FROM cuentas_bancarias);
     """)
 
-    # Porteo de Inventario Legacy a Materiales (Apilables)
+    # Porteo de Inventario Legacy a Materiales (Transacción Bifurcada Retrocompatible)
     await _connection.execute("""
-        INSERT INTO inventario_materiales (user_id, item_id, cantidad)
-        SELECT CAST(user_id AS VARCHAR), REPLACE(LOWER(producto_nombre), ' ', '_'), cantidad
-        FROM inventarios
-        ON CONFLICT(user_id, item_id) DO UPDATE SET cantidad = cantidad + excluded.cantidad;
+        INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad)
+        SELECT CAST(user_id AS VARCHAR), REPLACE(LOWER(producto_nombre), ' ', '_'), 0
+        FROM inventarios;
+    """)
+    # Usamos una sumatoria para evitar problemas si el inventario legacy ya tenía items repetidos.
+    await _connection.execute("""
+        UPDATE inventario_materiales
+        SET cantidad = cantidad + (
+            SELECT SUM(cantidad) FROM inventarios
+            WHERE CAST(user_id AS VARCHAR) = inventario_materiales.user_id
+              AND REPLACE(LOWER(producto_nombre), ' ', '_') = inventario_materiales.item_id
+        )
+        WHERE (user_id, item_id) IN (
+            SELECT CAST(user_id AS VARCHAR), REPLACE(LOWER(producto_nombre), ' ', '_') FROM inventarios
+        );
     """)
 
     # 10. Tablas para información mecánica de la hoja de personaje extraída de Nivel20
@@ -591,11 +609,14 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: st
                 # Sincronización de solo lectura, no modificamos SQLite según Schema V3
                 return
 
-            await _connection.execute("""
-                INSERT INTO inventario_materiales (user_id, item_id, cantidad)
-                VALUES (?, ?, 1)
-                ON CONFLICT(user_id, item_id) DO UPDATE SET cantidad = cantidad + 1
-            """, (user_str, item_id))
+            await _connection.execute(
+                "INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)",
+                (user_str, item_id)
+            )
+            await _connection.execute(
+                "UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?",
+                (user_str, item_id)
+            )
     except Exception as e:
         print(f"Error agregando item: {e}")
 
