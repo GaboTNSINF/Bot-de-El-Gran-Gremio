@@ -11,12 +11,9 @@ import re
 class VistaEncuestaDM(discord.ui.View):
     """Botonera interactiva e inmune a reinicios que procesa las reseñas de satisfacción."""
     def __init__(self):
-        # Constructor limpio sin argumentos dinámicos para garantizar persistencia absoluta
         super().__init__(timeout=None)
 
     async def procesar_voto_por_contexto(self, interaction: discord.Interaction, valor: int, label_voto: str):
-        """Extrae la metadata del DM desde el custom_id del botón y canaliza el voto hacia la base de datos."""
-        # El custom_id viene estructurado como: "vote_tipo:dm_id"
         custom_id_raw = interaction.data["custom_id"]
         try:
             dm_id_str = custom_id_raw.split(":")[1]
@@ -25,194 +22,196 @@ class VistaEncuestaDM(discord.ui.View):
             await interaction.response.send_message("❌ **Error de Integridad:** Los metadatos de esta encuesta están corruptos.", ephemeral=True)
             return
 
-        # Obtener el nombre del DM desde el entorno de Discord de forma segura
         dm_usuario = interaction.client.get_user(dm_id) or await interaction.client.fetch_user(dm_id)
         dm_name = dm_usuario.name if dm_usuario else f"DM-ID-{dm_id}"
 
-        # Transmisión asíncrona blindada hacia el backend de la BD
         await database.inyectar_fondos_ignorados(dm_id, dm_name, valor, label_voto)
 
-        # Deshabilitar todos los componentes de la vista actual para mitigar ataques de doble votación
         for child in self.children:
             child.disabled = True
         
         await interaction.message.edit(view=self)
-        await interaction.response.send_message(
-            f"✅ Gracias. Tu valoración de `{label_voto}` ha sido procesada de forma anónima en el sistema.", 
-            ephemeral=True
-        )
+        await interaction.response.send_message("✅ Voto registrado. Gracias por tu feedback.", ephemeral=True)
 
-    # Nota de Arquitectura: Los custom_ids se registrarán de forma dinámica en el despachador general al enviar el mensaje.
-    @discord.ui.button(label="⭐ Excelencia", style=discord.ButtonStyle.success, custom_id="vote_excelencia:base")
-    async def excelencia_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await self.procesar_voto_por_contexto(interaction, 1, "Excelencia")
+    @discord.ui.button(label="Excelente (5/5)", style=discord.ButtonStyle.success, custom_id="vote_exc")
+    async def btn_exc(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.procesar_voto_por_contexto(interaction, 5, "Excelente")
 
-    @discord.ui.button(label="😐 Neutral", style=discord.ButtonStyle.secondary, custom_id="vote_neutral:base")
-    async def neutral_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await self.procesar_voto_por_contexto(interaction, 0, "Neutral")
+    @discord.ui.button(label="Bueno (4/5)", style=discord.ButtonStyle.primary, custom_id="vote_bueno")
+    async def btn_bueno(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.procesar_voto_por_contexto(interaction, 4, "Bueno")
 
-    @discord.ui.button(label="⚠️ Alerta", style=discord.ButtonStyle.danger, custom_id="vote_alerta:base")
-    async def alerta_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await self.procesar_voto_por_contexto(interaction, -1, "Alerta")
+    @discord.ui.button(label="Regular (3/5)", style=discord.ButtonStyle.secondary, custom_id="vote_reg")
+    async def btn_reg(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.procesar_voto_por_contexto(interaction, 3, "Regular")
 
+    @discord.ui.button(label="Malo (1/5)", style=discord.ButtonStyle.danger, custom_id="vote_malo")
+    async def btn_malo(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.procesar_voto_por_contexto(interaction, 1, "Malo")
 
-class FormularioReporteSesion(discord.ui.Modal):
-    """Formulario interactivo para procesar las crónicas y la asistencia de las mesas de campaña."""
-    def __init__(self):
-        super().__init__(title="📜 Reporte de Sesión de Campaña")
+async def enviar_encuesta_individual(miembro, dm, aventura):
+    vista_personalizada = VistaEncuestaDM()
+    for button in vista_personalizada.children:
+        tipo_voto = button.custom_id.split(":")[0]
+        button.custom_id = f"{tipo_voto}:{dm.id}"
 
-        self.add_item(discord.ui.InputText(label="Nombre de la Aventura", placeholder="Ej: Las Catacumbas de Ostagar", required=True))
-        self.add_item(discord.ui.InputText(label="Jugadores (Separados por comas)", placeholder="Ej: gabo, ice, alistair (Usa nombres de usuario exactos)", required=True))
-        self.add_item(discord.ui.InputText(label="Recompensas (Oro y Objetos)", placeholder="Ej: 50 po a cada uno", style=discord.InputTextStyle.long, required=True))
-        self.add_item(discord.ui.InputText(label="Crónica Breve de la Mesa", placeholder="Resumen rápido de los acontecimientos...", style=discord.InputTextStyle.long, required=True))
-
-    async def enviar_encuesta_individual(self, miembro, dm, aventura):
-        """Corrútina interna para encapsular de forma segura el envío y evitar fallos en cascada."""
-        # Instanciamos una vista limpia y modificamos los custom_ids de sus botones reflejando la ID del DM específico
-        vista_personalizada = VistaEncuestaDM()
-        for button in vista_personalizada.children:
-            tipo_voto = button.custom_id.split(":")[0]
-            button.custom_id = f"{tipo_voto}:{dm.id}"
-
+    try:
         await miembro.send(
             f"👋 Saludos Aventurero. El **DM {dm.name}** acaba de registrar la sesión **'{aventura}'** en el Gremio.\n"
             f"Para ayudarnos a monitorear la calidad del juego, califica el desempeño de tu mesa:",
             view=vista_personalizada
         )
+    except discord.Forbidden:
+        pass
+
+
+# =========================================================================
+# REFACTOR V5: Flujo Multi-Paso Estricto UI V2 (Erradicación Texto Libre)
+# =========================================================================
+
+class ModalRecompensasGlobales(discord.ui.Modal):
+    def __init__(self, jugadores, salvaciones):
+        super().__init__(title="Recompensas y Variables Globales")
+        self.jugadores = jugadores # Lista de discord.Member
+        self.salvaciones = salvaciones # Dict: {member_id: bool_exito}
+
+        self.add_item(discord.ui.InputText(label="Aventura / Crónica Breve", placeholder="El asalto a la fortaleza...", required=True))
+        self.add_item(discord.ui.InputText(label="PC Totales a repartir por jugador", placeholder="Ej: 50000", required=True))
+        self.add_item(discord.ui.InputText(label="ID Objeto Recompensa (Opcional)", placeholder="Ej: pocion_curacion", required=False))
+        self.add_item(discord.ui.InputText(label="ID Anillo Geográfico de Viaje", placeholder="Ej: 2", required=True))
 
     async def callback(self, interaction: discord.Interaction):
-        # Explicación (Educativo): Interceptamos la expiración (error 10062 de Discord)
-        # Si un DM tarda más de 15 min en escribir su crónica, Discord caduca la sesión.
-        # Aquí envolvemos el 'defer' para capturar la excepción y no perder la crónica del DM.
         interaccion_expirada = False
         try:
-            # Handshake inmediato para dar más tiempo de proceso y evitar timeouts de 3s
             await interaction.response.defer(ephemeral=True)
         except discord.NotFound:
-            # La interacción caducó, marcamos el flag y proseguiremos rescatando el contenido.
             interaccion_expirada = True
-        
-        guild = interaction.guild
-        dm = interaction.user
-        if not guild: 
-            return
-
-        canal_auditoria = guild.get_channel(config.CANAL_DISCUSION_SESIONES)
-        if not canal_auditoria:
-            mensaje_error = "❌ Error: Canal de discusión de sesiones inaccesible. Verifica la ID en config.py."
-            if not interaccion_expirada:
-                await interaction.followup.send(mensaje_error, ephemeral=True)
-            else:
-                try:
-                    await dm.send(mensaje_error)
-                except discord.Forbidden:
-                    pass
-            return
 
         aventura = self.children[0].value.strip()
-        jugadores_raw = self.children[1].value.strip().split(",")
-        recompensas = self.children[2].value.strip()
-        cronica = self.children[3].value.strip()
 
-        miembros_detectados = []
-        menciones_texto = []
-        
-        # PROCESAMIENTO OPTIMIZADO EXCLUSIVO: Indexación O(N) local para búsquedas flexibles y tolerantes
-        # Explicación (Educativo): En lugar de coincidencias exactas, 'limpiamos' los strings quitando
-        # espacios y guiones bajos y los llevamos a minúsculas, lo que nos permite encontrar a "Dre Redgrave"
-        # aunque escriban "Dre_Redgrave" o "dre redgrave".
-        mapa_miembros = None
+        try:
+            pc_totales = int(self.children[1].value.strip())
+        except ValueError:
+            await interaction.followup.send("❌ El valor de PC Totales debe ser un número entero.", ephemeral=True)
+            return
 
-        for p_name in jugadores_raw:
-            p_name = p_name.strip()
-            if not p_name: 
-                continue
-            
-            member = None
+        objeto_id = self.children[2].value.strip()
+        anillo = self.children[3].value.strip()
 
-            # Intento de resolución 1: Mención directa (ej. <@123456789>)
-            match_mencion = re.search(r'<@!?(\d+)>', p_name)
-            if match_mencion:
-                member = guild.get_member(int(match_mencion.group(1)))
+        # REFACTOR V5: Ejecución Atómica (UPSERT)
+        try:
+            async with database._connection.transaction():
+                for j in self.jugadores:
+                    j_str = str(j.id)
+                    # Lazy init
+                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (j_str,))
 
-            # Intento de resolución 2: ID numérica directa (Hachazo rápido al caché de memoria)
-            if not member and p_name.isdigit():
-                member = guild.get_member(int(p_name))
-            
-            # Intento de resolución 3: Búsqueda flexible local (Fuzzy matching optimizado)
-            if not member:
-                if mapa_miembros is None:
-                    # Lazy loading: Construimos el índice O(N) normalizado
-                    mapa_miembros = {}
-                    for m in guild.members:
-                        nombres_posibles = [m.name]
-                        if hasattr(m, 'global_name') and m.global_name:
-                            nombres_posibles.append(m.global_name)
-                        if m.nick:
-                            nombres_posibles.append(m.nick)
+                    # Calcular extenuación: Si falló la salvación de Const, sumar 1
+                    extenuacion_mod = 0 if self.salvaciones.get(j.id, True) else 1
 
-                        for np in nombres_posibles:
-                            # Normalizamos quitando espacios y guiones bajos
-                            np_normalizado = re.sub(r'[\s_]+', '', np).lower()
-                            if np_normalizado not in mapa_miembros:
-                                mapa_miembros[np_normalizado] = m
+                    # Actualizar estado de viaje y extenuación
+                    # NOTA EDUCATIVA: Simulamos un viaje temporalmente bloqueando el estado_viajando
+                    await database._connection.execute("""
+                        UPDATE personajes_estados
+                        SET estado_viajando = 1,
+                            nivel_extenuacion = nivel_extenuacion + ?
+                        WHERE user_id = ?
+                    """, (extenuacion_mod, j_str))
 
-                # Normalizamos el término que el DM buscó
-                busqueda_normalizada = re.sub(r'[\s_]+', '', p_name).lower()
-                member = mapa_miembros.get(busqueda_normalizada)
+                    # Inyectar PC a la billetera usando UPSERT
+                    await database._connection.execute("""
+                        INSERT INTO economia_billetera (user_id, balance_pc) VALUES (?, ?)
+                        ON CONFLICT(user_id) DO UPDATE SET balance_pc = balance_pc + excluded.balance_pc
+                    """, (j_str, pc_totales))
 
-            if member:
-                if member not in miembros_detectados:
-                    miembros_detectados.append(member)
-                    menciones_texto.append(member.mention)
-            else:
-                menciones_texto.append(f"`{p_name}` (No encontrado)")
+                    # Opcional: Inyectar ítem si se dio ID
+                    if objeto_id:
+                        # Limpiar ID (normalizar)
+                        obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
+                        await database._connection.execute("""
+                            INSERT INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 1)
+                            ON CONFLICT(user_id, item_id) DO UPDATE SET cantidad = cantidad + 1
+                        """, (j_str, obj_norm))
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error de base de datos durante la inyección atómica: {e}", ephemeral=True)
+            return
 
+        # Generar tarjeta de auditoría
         folio = random.randint(10000, 99999)
+        canal_auditoria = interaction.guild.get_channel(config.CANAL_DISCUSION_SESIONES)
 
-        # Generar tarjeta de auditoría analítica
+        menciones_texto = [j.mention for j in self.jugadores]
+
         embed_auditoria = discord.Embed(title=f"🗃️ AUDITORÍA DE SESIÓN • FOLIO #{folio}", color=discord.Color.gold())
-        embed_auditoria.add_field(name="👑 Dungeon Master", value=dm.mention, inline=True)
+        embed_auditoria.add_field(name="👑 Dungeon Master", value=interaction.user.mention, inline=True)
         embed_auditoria.add_field(name="⚔️ Aventura", value=aventura, inline=True)
         embed_auditoria.add_field(name="👥 Jugadores En la Mesa", value=", ".join(menciones_texto), inline=False)
-        embed_auditoria.add_field(name="💰 Recompensas Declaradas", value=recompensas, inline=False)
-        embed_auditoria.add_field(name="📖 Bitácora del Narrador", value=cronica, inline=False)
-        embed_auditoria.set_footer(text="Filtro de Calidad • Encuestas de feedback inmediato.")
+        embed_auditoria.add_field(name="💰 PC Otorgados", value=f"{pc_totales} a c/u", inline=True)
+        embed_auditoria.add_field(name="🛡️ Fallaron Salvación", value=str(sum(1 for v in self.salvaciones.values() if not v)), inline=True)
 
-        await canal_auditoria.send(embed=embed_auditoria)
+        if canal_auditoria:
+            await canal_auditoria.send(embed=embed_auditoria)
 
-        # DISPARO ASÍNCRONO CONCURRENTE SENIOR: Procesamiento en paralelo mediante orquestación de corrutinas
-        # Esto evita cuellos de botella secuenciales si un usuario tiene DMs cerrados o lag de conexión
-        tareas = []
-        for miembro in miembros_detectados:
-            if miembro.bot: 
-                continue
-            tareas.append(self.enviar_encuesta_individual(miembro, dm, aventura))
+        # Disparar encuestas
+        tareas = [enviar_encuesta_individual(j, interaction.user, aventura) for j in self.jugadores if not j.bot]
+        await asyncio.gather(*tareas, return_exceptions=True)
 
-        # Ejecución masiva controlada en paralelo (Ignora errores de usuarios con DMs cerrados para evitar crasheos)
-        resultados = await asyncio.gather(*tareas, return_exceptions=True)
-        votos_enviados = sum(1 for res in resultados if not isinstance(res, Exception))
-
-        mensaje_exito = (
-            f"✅ **Reporte Recibido (Folio #{folio}):** Datos asentados en el canal de coordinación.\n"
-            f"Se han disparado `{votos_enviados}` encuestas automáticas de satisfacción a los jugadores en paralelo."
-        )
+        mensaje_exito = f"✅ **Reporte Exitoso (Folio #{folio}):** Datos inyectados atómicamente en la DB."
 
         if not interaccion_expirada:
             await interaction.followup.send(mensaje_exito, ephemeral=True)
         else:
-            # Explicación (Educativo): Como la interacción caducó (Discord la cortó), no podemos
-            # responder por el canal del bot usando 'interaction'. En su lugar, mandamos un MD (DM)
-            # al Narrador para informarle que, aunque tardó mucho, no perdió su texto y todo salió bien.
             try:
-                aviso_rescate = (
-                    f"⚠️ **Aviso del Sistema:** Tardaste más de 15 minutos en llenar el formulario y Discord cerró tu sesión... "
-                    f"¡Pero **hemos logrado rescatar tu reporte y procesarlo con éxito**! No has perdido nada de texto.\n\n"
-                    f"{mensaje_exito}"
-                )
-                await dm.send(aviso_rescate)
-            except discord.Forbidden:
+                await interaction.user.send(f"⚠️ La interacción expiró pero rescatamos los datos.\n{mensaje_exito}")
+            except:
                 pass
+
+
+class VistaSalvaciones(discord.ui.View):
+    def __init__(self, jugadores):
+        super().__init__(timeout=900) # 15 min
+        self.jugadores = jugadores
+        self.salvaciones = {j.id: True for j in jugadores} # Por defecto todos pasan
+
+        # Crear un select dinamico
+        opciones = [discord.SelectOption(label=j.display_name, value=str(j.id)) for j in jugadores]
+        self.select = discord.ui.Select(placeholder="¿Quiénes fallaron la tirada de Constitución?", min_values=0, max_values=len(opciones), options=opciones)
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
+
+        btn_confirmar = discord.ui.Button(label="Proceder al Modal Global", style=discord.ButtonStyle.success, row=1)
+        btn_confirmar.callback = self.confirmar_callback
+        self.add_item(btn_confirmar)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        # Resetear
+        self.salvaciones = {j.id: True for j in self.jugadores}
+        # Marcar los seleccionados como fallos (False)
+        for val in self.select.values:
+            self.salvaciones[int(val)] = False
+
+    async def confirmar_callback(self, interaction: discord.Interaction):
+        # Desplegamos el Modal final (Paso 3)
+        await interaction.response.send_modal(ModalRecompensasGlobales(self.jugadores, self.salvaciones))
+
+
+class VistaSeleccionJugadores(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=900)
+
+        self.user_select = discord.ui.UserSelect(placeholder="Selecciona a los jugadores de tu mesa (Max 8)", min_values=1, max_values=8)
+        self.user_select.callback = self.user_select_callback
+        self.add_item(self.user_select)
+
+    async def user_select_callback(self, interaction: discord.Interaction):
+        jugadores = self.user_select.values
+        if not jugadores:
+            await interaction.response.send_message("❌ Debes seleccionar al menos un jugador.", ephemeral=True)
+            return
+
+        # Pasar al Paso 2: Menú de Salvaciones
+        await interaction.response.edit_message(content="**Paso 2:** Selecciona a los jugadores que *FALLARON* su salvación de Constitución por el viaje/extenuación. Los que no selecciones, se asumirá que tuvieron Éxito.", view=VistaSalvaciones(jugadores))
 
 
 class SesionesCog(commands.Cog):
@@ -221,15 +220,16 @@ class SesionesCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        # Inyectar la vista estática base en el despachador de Pycord para asegurar la persistencia infinita tras apagados
         self.bot.add_view(VistaEncuestaDM())
 
-    @commands.slash_command(name="reportar_sesion", description="[DM] Despliega el formulario oficial para asentar los datos de tu última partida.")
+    @commands.slash_command(name="reportar_sesion", description="[DM] Despliega el flujo oficial para asentar los datos de tu última partida.")
     async def reportar_sesion(self, ctx: discord.ApplicationContext):
         if not any(rol.id == config.ROL_DUNGEON_MASTER for rol in ctx.user.roles):
             await ctx.respond("❌ Solo los miembros con el rol oficial de Dungeon Master pueden firmar actas de sesión.", ephemeral=True)
             return
-        await ctx.send_modal(FormularioReporteSesion())
+
+        # Paso 1: Vista Efímera con UserSelect
+        await ctx.respond("**Paso 1:** Selecciona los miembros de Discord que participaron en la sesión.", view=VistaSeleccionJugadores(), ephemeral=True)
 
     @commands.slash_command(name="auditar_dm", description="[STAFF] Extrae el análisis estadístico del Score Neto de un Dungeon Master.")
     async def auditar_dm(self, ctx: discord.ApplicationContext, dm_usuario: discord.Member):
@@ -237,7 +237,6 @@ class SesionesCog(commands.Cog):
             await ctx.respond("❌ Comando exclusivo para el alto mando de la Directiva.", ephemeral=True)
             return
 
-        # El nuevo database.py ya resuelve el perfil y las reseñas agrupadas en una única consulta indexada ultrarrápida
         dm_perfil = await database.obtener_perfil_dm(dm_usuario.id)
 
         if not dm_perfil or dm_perfil["partidas"] == 0:

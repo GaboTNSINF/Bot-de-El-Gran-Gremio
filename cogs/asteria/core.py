@@ -1,4 +1,9 @@
 import discord
 from discord.ext import commands
 
-# En el futuro se rellenará la lógica asíncrona V4
+class AsteriaCore(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+def setup(bot):
+    bot.add_cog(AsteriaCore(bot))
