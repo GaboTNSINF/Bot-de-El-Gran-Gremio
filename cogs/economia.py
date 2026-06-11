@@ -11,7 +11,7 @@ class EconomiaCog(commands.Cog):
         self.bot = bot
         self.DIVISAS_METADATA = {
             "platino": {"emoji": "🪙", "sigla": "pp", "nombre": "Platino"},
-            "oro":     {"keys": "🥇", "sigla": "po", "nombre": "Oro"},
+            "oro":     {"emoji": "🥇", "sigla": "po", "nombre": "Oro"},
             "plata":   {"emoji": "🥈", "sigla": "ppl", "nombre": "Plata"},
             "cobre":   {"emoji": "🟫", "sigla": "pc", "nombre": "Cobre"}
         }
@@ -291,7 +291,7 @@ class EconomiaCog(commands.Cog):
             return
 
         await ctx.response.defer(ephemeral=True)
-        cobre_bruto = self._convertir_a_cobre(moneda, Rails := cantidad)
+        cobre_bruto = self._convertir_a_cobre(moneda, cantidad)
         receptor_id = 0 if usuario.id == self.bot.user.id else usuario.id
 
         exito = await database.transferir_fondos(ctx.user.id, receptor_id, cobre_bruto)
