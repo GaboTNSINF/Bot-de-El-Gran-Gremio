@@ -98,37 +98,39 @@ class ModalRecompensasGlobales(discord.ui.Modal):
         objeto_id = self.children[2].value.strip()
         anillo = self.children[3].value.strip()
 
-        # REFACTOR V5: Ejecución Atómica (UPSERT)
+        # REFACTOR V5: Ejecución Atómica
         try:
-            async with database._connection.transaction():
-                for j in self.jugadores:
-                    j_str = str(j.id)
-                    # Lazy init
-                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (j_str,))
+            await database._connection.execute("BEGIN")
+            for j in self.jugadores:
+                j_str = str(j.id)
+                # Lazy init
+                await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (j_str,))
 
-                    # Calcular extenuación: Si falló la salvación de Const, sumar 1
-                    extenuacion_mod = 0 if self.salvaciones.get(j.id, True) else 1
+                # Calcular extenuación: Si falló la salvación de Const, sumar 1
+                extenuacion_mod = 0 if self.salvaciones.get(j.id, True) else 1
 
-                    # Actualizar estado de viaje y extenuación
-                    # NOTA EDUCATIVA: Simulamos un viaje temporalmente bloqueando el estado_viajando
-                    await database._connection.execute("""
-                        UPDATE personajes_estados
-                        SET estado_viajando = 1,
-                            nivel_extenuacion = nivel_extenuacion + ?
-                        WHERE user_id = ?
-                    """, (extenuacion_mod, j_str))
+                # Actualizar estado de viaje y extenuación
+                # NOTA EDUCATIVA: Simulamos un viaje temporalmente bloqueando el estado_viajando
+                await database._connection.execute("""
+                    UPDATE personajes_estados
+                    SET estado_viajando = 1,
+                        nivel_extenuacion = nivel_extenuacion + ?
+                    WHERE user_id = ?
+                """, (extenuacion_mod, j_str))
 
-                    # Inyectar PC a la billetera (Transacción Bifurcada Retrocompatible V6)
-                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (j_str,))
-                    await database._connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (pc_totales, j_str))
+                # Inyectar PC a la billetera (Transacción Bifurcada Retrocompatible V6)
+                await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (j_str,))
+                await database._connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (pc_totales, j_str))
 
-                    # Opcional: Inyectar ítem si se dio ID
-                    if objeto_id:
-                        # Limpiar ID (normalizar)
-                        obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
-                        await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_str, obj_norm))
-                        await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_str, obj_norm))
+                # Opcional: Inyectar ítem si se dio ID
+                if objeto_id:
+                    # Limpiar ID (normalizar)
+                    obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
+                    await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_str, obj_norm))
+                    await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_str, obj_norm))
+            await database._connection.commit()
         except Exception as e:
+            await database._connection.rollback()
             await interaction.followup.send(f"❌ Error de base de datos durante la inyección atómica: {e}", ephemeral=True)
             return
 
