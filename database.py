@@ -296,12 +296,19 @@ async def init_db():
 
     await _connection.commit()
     
-    # Inyección Inicial del Fondo de Reserva Maestro (1,000 pp = 1,000,000 pc)
-    async with _connection.execute("SELECT balance_pc FROM cuentas_bancarias WHERE id_entidad = 0") as cursor:
-        if not await cursor.fetchone():
-            await _connection.execute("INSERT INTO cuentas_bancarias (id_entidad, balance_pc) VALUES (0, 1000000)")
-            await _connection.commit()
-            print("💰 [BANCO] Bóveda Central inicializada con 1,000,000 pc.")
+    # REFACTORIZACIÓN EN init_db() DE database.py
+    async with _connection.transaction():
+        # 1. Garantizar la existencia física de la Bóveda Central con el nuevo capital base
+        await _connection.execute(
+            "INSERT OR IGNORE INTO cuentas_bancarias (id_entidad, balance_pc) VALUES (0, 20000000)"
+        )
+
+        # 2. Si la base de datos es heredada y la bóveda conserva el saldo mínimo antiguo (1,000,000 pc)
+        # o inferior, se actualiza al buffer de seguridad trimestre sin alterar las cuentas de los usuarios.
+        await _connection.execute(
+            "UPDATE cuentas_bancarias SET balance_pc = 20000000 WHERE id_entidad = 0 AND balance_pc < 20000000"
+        )
+        print("💰 [TESORERÍA] Bóveda Central blindada y estabilizada en 20,000,000 pc (20,000 pp).")
 
 # --- MÓDULO DE CONSULTAS OPTIMIZADAS ---
 
