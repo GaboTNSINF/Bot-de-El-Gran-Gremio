@@ -8,10 +8,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Unir la ruta para que la base de datos se aloje e inicialice estrictamente en tu carpeta de proyecto
 DB_PATH = os.path.join(BASE_DIR, "gremio.db")
 
+import asyncio
+
 # Tubería de conexión global persistente en memoria RAM para evitar bloqueos de disco
 # NOTA EDUCATIVA: Usamos una conexión persistente para no estar abriendo y cerrando
 # el archivo de la base de datos en cada comando, lo que en un VPS causaría lentitud y errores.
 _connection = None
+
+# Lock Global de Exclusión Mutua para serializar transacciones de escritura y prevenir colisiones (Race Conditions).
+# Este candado envolverá los bloques BEGIN/COMMIT sin bloquear las lecturas asíncronas del modo WAL.
+db_lock = asyncio.Lock()
 
 async def init_db():
     """Inicializa el pool de conexiones persistentes y forja las tablas del reino."""
@@ -143,22 +149,23 @@ async def init_db():
         );
 
         CREATE TABLE IF NOT EXISTS personajes_estados (
-            user_id VARCHAR(30) PRIMARY KEY,
+            user_id INTEGER PRIMARY KEY,
             estado_viajando BOOLEAN DEFAULT 0,
             viaje_desbloqueo_timestamp INTEGER DEFAULT 0,
             nivel_extenuacion INTEGER DEFAULT 0,
             estado_herido BOOLEAN DEFAULT 0,
-            pendiente_auditoria BOOLEAN DEFAULT 0
+            pendiente_auditoria BOOLEAN DEFAULT 0,
+            anillo_geografico_id INTEGER DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS economia_billetera (
-            user_id VARCHAR(30) PRIMARY KEY,
+            user_id INTEGER PRIMARY KEY,
             balance_pc INTEGER DEFAULT 0 CHECK(balance_pc >= 0),
             FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS inventario_materiales (
-            user_id VARCHAR(30) NOT NULL,
+            user_id INTEGER NOT NULL,
             item_id VARCHAR(50) NOT NULL,
             cantidad INTEGER NOT NULL CHECK(cantidad >= 0),
             PRIMARY KEY (user_id, item_id),
@@ -167,7 +174,7 @@ async def init_db():
 
         CREATE TABLE IF NOT EXISTS inventario_instancias (
             instance_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id VARCHAR(30) NOT NULL,
+            user_id INTEGER NOT NULL,
             item_id VARCHAR(50) NOT NULL,
             durabilidad_actual INTEGER NOT NULL CHECK(durabilidad_actual >= 0),
             grado_runa INTEGER DEFAULT 0,
@@ -199,47 +206,62 @@ async def init_db():
         )
     """)
 
-    # --- MIGRACIÓN ATÓMICA DE DATOS (PORTEO V3) ---
-    # Lazy Bridge para foráneas
-    await _connection.execute("""
-        INSERT OR IGNORE INTO personajes_estados (user_id)
-        SELECT CAST(id_entidad AS VARCHAR) FROM cuentas_bancarias;
-    """)
-    # Bóveda Central (ID 0)
-    await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES ('0');")
+    # --- PUENTE DE RETROCOMPATIBILIDAD ANILLO GEOGRÁFICO ---
+    async with _connection.execute("PRAGMA table_info(personajes_estados)") as cursor:
+        columnas_estados = [columna["name"] for columna in await cursor.fetchall()]
 
-    # Porteo de Economía In-Place a economia_billetera (Transacción Bifurcada Retrocompatible)
-    await _connection.execute("""
-        INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc)
-        SELECT CAST(id_entidad AS VARCHAR), 0 FROM cuentas_bancarias;
-    """)
-    await _connection.execute("""
-        UPDATE economia_billetera
-        SET balance_pc = balance_pc + (
-            SELECT balance_pc FROM cuentas_bancarias
-            WHERE CAST(id_entidad AS VARCHAR) = economia_billetera.user_id
-        )
-        WHERE user_id IN (SELECT CAST(id_entidad AS VARCHAR) FROM cuentas_bancarias);
-    """)
+    if "anillo_geografico_id" not in columnas_estados:
+        await _connection.execute("ALTER TABLE personajes_estados ADD COLUMN anillo_geografico_id INTEGER DEFAULT NULL")
+        print("🔧 [MIGRACIÓN] Inyectada columna 'anillo_geografico_id' en 'personajes_estados'")
 
-    # Porteo de Inventario Legacy a Materiales (Transacción Bifurcada Retrocompatible)
-    await _connection.execute("""
-        INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad)
-        SELECT CAST(user_id AS VARCHAR), REPLACE(LOWER(producto_nombre), ' ', '_'), 0
-        FROM inventarios;
-    """)
-    # Usamos una sumatoria para evitar problemas si el inventario legacy ya tenía items repetidos.
-    await _connection.execute("""
-        UPDATE inventario_materiales
-        SET cantidad = cantidad + (
-            SELECT SUM(cantidad) FROM inventarios
-            WHERE CAST(user_id AS VARCHAR) = inventario_materiales.user_id
-              AND REPLACE(LOWER(producto_nombre), ' ', '_') = inventario_materiales.item_id
-        )
-        WHERE (user_id, item_id) IN (
-            SELECT CAST(user_id AS VARCHAR), REPLACE(LOWER(producto_nombre), ' ', '_') FROM inventarios
-        );
-    """)
+    # --- MIGRACIÓN ATÓMICA DE DATOS (PORTEO V3 CONDICIONADO) ---
+    async with _connection.execute("PRAGMA user_version") as cursor:
+        version_db = (await cursor.fetchone())[0]
+
+    if version_db < 1:
+        # Lazy Bridge para foráneas
+        await _connection.execute("""
+            INSERT OR IGNORE INTO personajes_estados (user_id)
+            SELECT id_entidad FROM cuentas_bancarias;
+        """)
+        # Bóveda Central (ID 0)
+        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0);")
+
+        # Porteo de Economía In-Place a economia_billetera (Transacción Bifurcada Retrocompatible)
+        await _connection.execute("""
+            INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc)
+            SELECT id_entidad, 0 FROM cuentas_bancarias;
+        """)
+        await _connection.execute("""
+            UPDATE economia_billetera
+            SET balance_pc = balance_pc + (
+                SELECT balance_pc FROM cuentas_bancarias
+                WHERE id_entidad = economia_billetera.user_id
+            )
+            WHERE user_id IN (SELECT id_entidad FROM cuentas_bancarias);
+        """)
+
+        # Porteo de Inventario Legacy a Materiales (Transacción Bifurcada Retrocompatible)
+        await _connection.execute("""
+            INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad)
+            SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_'), 0
+            FROM inventarios;
+        """)
+        # Usamos una sumatoria para evitar problemas si el inventario legacy ya tenía items repetidos.
+        await _connection.execute("""
+            UPDATE inventario_materiales
+            SET cantidad = cantidad + (
+                SELECT SUM(cantidad) FROM inventarios
+                WHERE user_id = inventario_materiales.user_id
+                  AND REPLACE(LOWER(producto_nombre), ' ', '_') = inventario_materiales.item_id
+            )
+            WHERE (user_id, item_id) IN (
+                SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_') FROM inventarios
+            );
+        """)
+
+        await _connection.execute("PRAGMA user_version = 1")
+        print("🔧 [MIGRACIÓN] Ejecutado el porteo histórico V3 (Economía e Inventarios). PRAGMA user_version actualizado a 1.")
 
     # 10. Tablas para información mecánica de la hoja de personaje extraída de Nivel20
     await _connection.execute("""
@@ -298,21 +320,29 @@ async def init_db():
     
     # REFACTORIZACIÓN FINAL DE TESORERÍA EN init_db()
     try:
-        await _connection.execute("BEGIN")
-        # 1. Garantizar la existencia física de la Bóveda Central en la tabla canónica V3
-        await _connection.execute(
-            "INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES ('0', 20000000)"
-        )
+        async with db_lock:
+            await _connection.execute("BEGIN")
+            # 1. Garantizar la existencia física de la Bóveda Central en la tabla canónica V3
+            await _connection.execute(
+            "INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 20000000)"
+            )
 
-        # 2. Si la base de datos es heredada y posee un balance menor al buffer de seguridad,
-        # se reajusta automáticamente a 20,000,000 pc (20,000 pp) sin alterar el circulante.
-        await _connection.execute(
-            "UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = '0' AND balance_pc < 20000000"
-        )
-        await _connection.commit()
+            # 2. Si la base de datos es heredada y posee un balance menor al buffer de seguridad,
+            # se reajusta automáticamente a 20,000,000 pc (20,000 pp) sin alterar el circulante.
+            await _connection.execute(
+            "UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = 0 AND balance_pc < 20000000"
+            )
+            await _connection.commit()
         print("💰 [TESORERÍA] Bóveda Central canonicalizada y estabilizada en 20,000,000 pc (20,000 pp) en economia_billetera.")
     except Exception as e:
-        await _connection.rollback()
+        # En caso de error, aseguramos el rollback.
+        # (El rollback no requiere lock, o puede ir dentro del except con lock, pero
+        # ya que el error aborta el bloque `async with db_lock`, necesitamos hacer rollback aparte
+        # para que la conexion se libere, pero como `_connection.execute("BEGIN")` podría haber
+        # fallado, o algo dentro lo hizo, debemos re-adquirir el lock para el rollback o hacerlo
+        # directamente.)
+        async with db_lock:
+            await _connection.rollback()
         print(f"❌ Error Crítico al inicializar la Bóveda Central en economia_billetera: {e}")
 
 # --- MÓDULO DE CONSULTAS OPTIMIZADAS ---
@@ -515,65 +545,65 @@ async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) 
     if cantidad_pc <= 0:
         return False
 
-    emisor_str = str(emisor_id)
-    receptor_str = str(receptor_id)
-
     # REFACTOR V5: Transacciones explícitas para portabilidad segura en Schema V3
     try:
-        await _connection.execute("BEGIN")
-        # Lazy Init para ambos
-        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (emisor_str,))
-        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_str,))
+        async with db_lock:
+            await _connection.execute("BEGIN")
+            # Lazy Init para ambos
+            await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (emisor_id,))
+            await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
 
-        await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (emisor_str,))
-        await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_str,))
+            await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (emisor_id,))
+            await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
 
-        # 2. Deducción condicionada en el WHERE
-        async with _connection.execute(
-            "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = ? AND balance_pc >= ?",
-            (cantidad_pc, emisor_str, cantidad_pc)
-        ) as cursor:
-            if cursor.rowcount == 0:
-                await _connection.rollback()
-                return False  # El emisor no cuenta con los fondos requeridos. Abortado, se activa Rollback manual.
+            # 2. Deducción condicionada en el WHERE
+            async with _connection.execute(
+                "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = ? AND balance_pc >= ?",
+                (cantidad_pc, emisor_id, cantidad_pc)
+            ) as cursor:
+                if cursor.rowcount == 0:
+                    await _connection.rollback()
+                    return False  # El emisor no cuenta con los fondos requeridos. Abortado, se activa Rollback manual.
 
-        # 3. Inyección al receptor
-        await _connection.execute(
-            "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
-            (cantidad_pc, receptor_str)
-        )
-        await _connection.commit()
-        return True
+            # 3. Inyección al receptor
+            await _connection.execute(
+                "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
+                (cantidad_pc, receptor_id)
+            )
+            await _connection.commit()
+            return True
     except Exception:
-        await _connection.rollback()
+        async with db_lock:
+            await _connection.rollback()
         return False
 
 async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
     """Extrae fondos directamente de la Bóveda del Gremio (id 0) bajo validación atómica estructural V3."""
-    receptor_str = str(receptor_id)
     
     try:
-        await _connection.execute("BEGIN")
-        # Lazy init
-        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_str,))
-        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES ('0')")
-        await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_str,))
-        await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES ('0', 0)")
+        async with db_lock:
+            await _connection.execute("BEGIN")
+            # Lazy init
+            await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
+            await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
+            await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
+            await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
 
-        # Restar de la bóveda
-        async with _connection.execute(
-            "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = '0' AND balance_pc >= ?",
-            (cantidad_pc, cantidad_pc)
-        ) as cursor:
-            if cursor.rowcount == 0:
-                await _connection.rollback()
-                return False  # Bóveda sin liquidez
+            # Restar de la bóveda
+            async with _connection.execute(
+                "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0 AND balance_pc >= ?",
+                (cantidad_pc, cantidad_pc)
+            ) as cursor:
+                if cursor.rowcount == 0:
+                    await _connection.rollback()
+                    return False  # Bóveda sin liquidez
 
-        await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_str))
-        await _connection.commit()
-        return True
+            await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_id))
+            await _connection.commit()
+            return True
     except Exception:
-        await _connection.rollback()
+        async with db_lock:
+            await _connection.rollback()
         return False
 
 # --- TIENDA E INVENTARIOS ---
@@ -616,61 +646,62 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: st
     Suma 1 a la cantidad de un producto en el inventario del usuario V3 (Solo materiales apilables).
     Si no existe, lo crea.
     """
-    user_str = str(user_id)
     item_id = producto_nombre.lower().replace(" ", "_")
     try:
-        await _connection.execute("BEGIN")
-        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_str,))
+        async with db_lock:
+            await _connection.execute("BEGIN")
+            await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
 
-        if origen == 'nivel20':
-            # Sincronización de solo lectura, no modificamos SQLite según Schema V3
+            if origen == 'nivel20':
+                # Sincronización de solo lectura, no modificamos SQLite según Schema V3
+                await _connection.commit()
+                return
+
+            await _connection.execute(
+                "INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)",
+                (user_id, item_id)
+            )
+            await _connection.execute(
+                "UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?",
+                (user_id, item_id)
+            )
             await _connection.commit()
-            return
-
-        await _connection.execute(
-            "INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)",
-            (user_str, item_id)
-        )
-        await _connection.execute(
-            "UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?",
-            (user_str, item_id)
-        )
-        await _connection.commit()
     except Exception as e:
-        await _connection.rollback()
+        async with db_lock:
+            await _connection.rollback()
         print(f"Error agregando item: {e}")
 
 async def obtener_inventario_usuario(user_id: int):
-    user_str = str(user_id)
     # Reconstruimos la salida legacy uniendo ambas tablas V3
     async with _connection.execute("""
         SELECT 0 as id, item_id as producto_nombre, cantidad, 'tienda' as origen
         FROM inventario_materiales WHERE user_id = ?
-    """, (user_str,)) as cursor:
+    """, (user_id,)) as cursor:
         return await cursor.fetchall()
 
 async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
     """
     Resta 1 a la cantidad del producto. Si llega a 0, se elimina del inventario (V3).
     """
-    user_str = str(user_id)
     item_id = producto_nombre.lower().replace(" ", "_")
 
     try:
-        await _connection.execute("BEGIN")
-        async with _connection.execute(
-            "UPDATE inventario_materiales SET cantidad = cantidad - 1 WHERE user_id = ? AND item_id = ? AND cantidad > 0",
-            (user_str, item_id)
-        ) as cursor:
-            if cursor.rowcount == 0:
-                await _connection.rollback()
-                return False
+        async with db_lock:
+            await _connection.execute("BEGIN")
+            async with _connection.execute(
+                "UPDATE inventario_materiales SET cantidad = cantidad - 1 WHERE user_id = ? AND item_id = ? AND cantidad > 0",
+                (user_id, item_id)
+            ) as cursor:
+                if cursor.rowcount == 0:
+                    await _connection.rollback()
+                    return False
 
-        await _connection.execute("DELETE FROM inventario_materiales WHERE user_id = ? AND cantidad <= 0", (user_str,))
-        await _connection.commit()
-        return True
+            await _connection.execute("DELETE FROM inventario_materiales WHERE user_id = ? AND cantidad <= 0", (user_id,))
+            await _connection.commit()
+            return True
     except Exception:
-        await _connection.rollback()
+        async with db_lock:
+            await _connection.rollback()
         return False
 
 # --- LÓGICA DE FICHA NIVEL20 ---
@@ -737,51 +768,57 @@ async def obtener_datos_ficha_completos(user_id: int):
 
 async def embargar_fondos(user_id: int) -> int:
     """Extrae la totalidad de los fondos de un usuario y los inyecta en la Bóveda Central (id 0) (V3)."""
-    user_str = str(user_id)
     try:
-        await _connection.execute("BEGIN")
-        async with _connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (user_str,)) as cursor:
-            row = await cursor.fetchone()
-            if not row or row["balance_pc"] <= 0:
-                await _connection.rollback()
-                return 0
-            saldo_recuperado = row["balance_pc"]
+        # Extraer el SELECT de validación fuera del Lock para respetar WAL si es posible,
+        # pero para consistencia transaccional incautatoria (que nadie gaste en el milisegundo),
+        # envolveremos la verificación de liquidez DENTRO de la transacción
+        async with db_lock:
+            await _connection.execute("BEGIN")
+            async with _connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                if not row or row["balance_pc"] <= 0:
+                    await _connection.rollback()
+                    return 0
+                saldo_recuperado = row["balance_pc"]
 
-        await _connection.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id = ?", (user_str,))
+            await _connection.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id = ?", (user_id,))
 
-        # Asegurar boveda
-        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES ('0')")
-        await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES ('0', 0)")
+            # Asegurar boveda
+            await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
+            await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
 
-        await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = '0'", (saldo_recuperado,))
-        await _connection.commit()
-        return saldo_recuperado
+            await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_recuperado,))
+            await _connection.commit()
+            return saldo_recuperado
     except Exception:
-        await _connection.rollback()
+        async with db_lock:
+            await _connection.rollback()
         return 0
 
 async def embargo_masivo() -> int:
     """Wipe económico total V3: Transfiere todos los fondos de los jugadores a la Bóveda Central."""
     try:
-        await _connection.execute("BEGIN")
-        saldo_total_recuperado = 0
-        async with _connection.execute("SELECT SUM(balance_pc) as total FROM economia_billetera WHERE user_id != '0'") as cursor:
-            row = await cursor.fetchone()
-            if row and row["total"]:
-                saldo_total_recuperado = row["total"]
+        async with db_lock:
+            await _connection.execute("BEGIN")
+            saldo_total_recuperado = 0
+            async with _connection.execute("SELECT SUM(balance_pc) as total FROM economia_billetera WHERE user_id != 0") as cursor:
+                row = await cursor.fetchone()
+                if row and row["total"]:
+                    saldo_total_recuperado = row["total"]
 
-        if saldo_total_recuperado > 0:
-            await _connection.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id != '0'")
+            if saldo_total_recuperado > 0:
+                await _connection.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id != 0")
 
-            await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES ('0')")
-            await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES ('0', 0)")
+                await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
+                await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
 
-            await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = '0'", (saldo_total_recuperado,))
+                await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_total_recuperado,))
 
-        await _connection.commit()
-        return saldo_total_recuperado
+            await _connection.commit()
+            return saldo_total_recuperado
     except Exception:
-        await _connection.rollback()
+        async with db_lock:
+            await _connection.rollback()
         return 0
 
 

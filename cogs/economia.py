@@ -160,32 +160,34 @@ class EconomiaCog(commands.Cog):
 
         # Ejecución Industrial en Base de Datos (1 sola transacción para N usuarios)
         try:
-            await database._connection.execute("BEGIN")
-            # 1. Comprobar liquidez de la Bóveda Central ('0')
-            async with database._connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = '0'") as cursor:
-                boveda = await cursor.fetchone()
-                if not boveda or boveda["balance_pc"] < total_gasto_pc:
-                    await database._connection.rollback()
-                    await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda (ID 0) no tiene liquidez ({boveda['balance_pc'] if boveda else 0} pc) para cubrir la nómina de {total_gasto_pc} pc. Abortado.")
-                    return
+            async with database.db_lock:
+                await database._connection.execute("BEGIN")
+                # 1. Comprobar liquidez de la Bóveda Central ('0')
+                async with database._connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = '0'") as cursor:
+                    boveda = await cursor.fetchone()
+                    if not boveda or boveda["balance_pc"] < total_gasto_pc:
+                        await database._connection.rollback()
+                        await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda (ID 0) no tiene liquidez ({boveda['balance_pc'] if boveda else 0} pc) para cubrir la nómina de {total_gasto_pc} pc. Abortado.")
+                        return
 
-            # 2. Restar el bloque masivo a la bóveda
-            await database._connection.execute(
-                "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = '0'",
-                (total_gasto_pc,)
-            )
-
-            # 3. Iterar inserciones seguras (Transacción Bifurcada Retrocompatible V6)
-            for user_id_str, monto in pagos_pendientes.items():
-                await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id_str,))
-                await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (user_id_str,))
+                # 2. Restar el bloque masivo a la bóveda
                 await database._connection.execute(
-                    "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
-                    (monto, user_id_str)
+                    "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = '0'",
+                    (total_gasto_pc,)
                 )
-            await database._connection.commit()
+
+                # 3. Iterar inserciones seguras (Transacción Bifurcada Retrocompatible V6)
+                for user_id_str, monto in pagos_pendientes.items():
+                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id_str,))
+                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (user_id_str,))
+                    await database._connection.execute(
+                        "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
+                        (monto, user_id_str)
+                    )
+                await database._connection.commit()
         except Exception as e:
-            await database._connection.rollback()
+            async with database.db_lock:
+                await database._connection.rollback()
             await ctx.followup.send(f"❌ **Error Crítico de Dispersión:** {e}. Se ha ejecutado un Rollback manual.")
             return
 

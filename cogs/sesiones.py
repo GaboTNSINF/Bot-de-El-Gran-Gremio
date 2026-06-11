@@ -14,12 +14,12 @@ class VistaEncuestaDM(discord.ui.View):
         super().__init__(timeout=None)
 
     async def procesar_voto_por_contexto(self, interaction: discord.Interaction, valor: int, label_voto: str):
-        custom_id_raw = interaction.data["custom_id"]
         try:
-            dm_id_str = custom_id_raw.split(":")[1]
+            # Recuperar el ID del DM inyectado en el footer del Embed
+            dm_id_str = interaction.message.embeds[0].footer.text.replace("DM-ID:", "")
             dm_id = int(dm_id_str)
-        except (IndexError, ValueError):
-            await interaction.response.send_message("❌ **Error de Integridad:** Los metadatos de esta encuesta están corruptos.", ephemeral=True)
+        except (IndexError, ValueError, AttributeError):
+            await interaction.response.send_message("❌ **Error de Integridad:** Los metadatos de esta encuesta están corruptos o el embed fue alterado.", ephemeral=True)
             return
 
         dm_usuario = interaction.client.get_user(dm_id) or await interaction.client.fetch_user(dm_id)
@@ -51,16 +51,18 @@ class VistaEncuestaDM(discord.ui.View):
 
 async def enviar_encuesta_individual(miembro, dm, aventura):
     vista_personalizada = VistaEncuestaDM()
-    for button in vista_personalizada.children:
-        tipo_voto = button.custom_id.split(":")[0]
-        button.custom_id = f"{tipo_voto}:{dm.id}"
+
+    # Construir Embed que persistirá el metadata DM-ID
+    embed = discord.Embed(
+        title="Evaluación de Sesión",
+        description=f"👋 Saludos Aventurero. El **DM {dm.name}** acaba de registrar la sesión **'{aventura}'** en el Gremio.\n"
+                    f"Para ayudarnos a monitorear la calidad del juego, califica el desempeño de tu mesa:",
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text=f"DM-ID:{dm.id}")
 
     try:
-        await miembro.send(
-            f"👋 Saludos Aventurero. El **DM {dm.name}** acaba de registrar la sesión **'{aventura}'** en el Gremio.\n"
-            f"Para ayudarnos a monitorear la calidad del juego, califica el desempeño de tu mesa:",
-            view=vista_personalizada
-        )
+        await miembro.send(embed=embed, view=vista_personalizada)
     except discord.Forbidden:
         pass
 
@@ -96,41 +98,49 @@ class ModalRecompensasGlobales(discord.ui.Modal):
             return
 
         objeto_id = self.children[2].value.strip()
-        anillo = self.children[3].value.strip()
+
+        try:
+            anillo_id = int(self.children[3].value.strip())
+        except ValueError:
+            await interaction.followup.send("❌ El ID del Anillo Geográfico debe ser un número entero válido.", ephemeral=True)
+            return
 
         # REFACTOR V5: Ejecución Atómica
         try:
-            await database._connection.execute("BEGIN")
-            for j in self.jugadores:
-                j_str = str(j.id)
-                # Lazy init
-                await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (j_str,))
+            async with database.db_lock:
+                await database._connection.execute("BEGIN")
+                for j in self.jugadores:
+                    j_str = str(j.id)
+                    # Lazy init
+                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (j_str,))
 
-                # Calcular extenuación: Si falló la salvación de Const, sumar 1
-                extenuacion_mod = 0 if self.salvaciones.get(j.id, True) else 1
+                    # Calcular extenuación: Si falló la salvación de Const, sumar 1
+                    extenuacion_mod = 0 if self.salvaciones.get(j.id, True) else 1
 
-                # Actualizar estado de viaje y extenuación
-                # NOTA EDUCATIVA: Simulamos un viaje temporalmente bloqueando el estado_viajando
-                await database._connection.execute("""
-                    UPDATE personajes_estados
-                    SET estado_viajando = 1,
-                        nivel_extenuacion = nivel_extenuacion + ?
-                    WHERE user_id = ?
-                """, (extenuacion_mod, j_str))
+                    # Actualizar estado de viaje y extenuación (y anillo_id)
+                    # NOTA EDUCATIVA: Simulamos un viaje temporalmente bloqueando el estado_viajando
+                    await database._connection.execute("""
+                        UPDATE personajes_estados
+                        SET estado_viajando = 1,
+                            nivel_extenuacion = nivel_extenuacion + ?,
+                            anillo_geografico_id = ?
+                        WHERE user_id = ?
+                    """, (extenuacion_mod, anillo_id, j_str))
 
-                # Inyectar PC a la billetera (Transacción Bifurcada Retrocompatible V6)
-                await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (j_str,))
-                await database._connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (pc_totales, j_str))
+                    # Inyectar PC a la billetera (Transacción Bifurcada Retrocompatible V6)
+                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (j_str,))
+                    await database._connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (pc_totales, j_str))
 
-                # Opcional: Inyectar ítem si se dio ID
-                if objeto_id:
-                    # Limpiar ID (normalizar)
-                    obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
-                    await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_str, obj_norm))
-                    await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_str, obj_norm))
-            await database._connection.commit()
+                    # Opcional: Inyectar ítem si se dio ID
+                    if objeto_id:
+                        # Limpiar ID (normalizar)
+                        obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
+                        await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_str, obj_norm))
+                        await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_str, obj_norm))
+                await database._connection.commit()
         except Exception as e:
-            await database._connection.rollback()
+            async with database.db_lock:
+                await database._connection.rollback()
             await interaction.followup.send(f"❌ Error de base de datos durante la inyección atómica: {e}", ephemeral=True)
             return
 
@@ -143,6 +153,7 @@ class ModalRecompensasGlobales(discord.ui.Modal):
         embed_auditoria = discord.Embed(title=f"🗃️ AUDITORÍA DE SESIÓN • FOLIO #{folio}", color=discord.Color.gold())
         embed_auditoria.add_field(name="👑 Dungeon Master", value=interaction.user.mention, inline=True)
         embed_auditoria.add_field(name="⚔️ Aventura", value=aventura, inline=True)
+        embed_auditoria.add_field(name="💍 Anillo de Viaje", value=f"ID: {anillo_id}", inline=True)
         embed_auditoria.add_field(name="👥 Jugadores En la Mesa", value=", ".join(menciones_texto), inline=False)
         embed_auditoria.add_field(name="💰 PC Otorgados", value=f"{pc_totales} a c/u", inline=True)
         embed_auditoria.add_field(name="🛡️ Fallaron Salvación", value=str(sum(1 for v in self.salvaciones.values() if not v)), inline=True)

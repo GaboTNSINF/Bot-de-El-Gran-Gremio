@@ -64,7 +64,8 @@ async def ejecutar_bot():
         "cogs.dados", # AGREGAMOS EL NUEVO MÓDULO DE DADOS
         "cogs.tienda",  # Catálogo interactivo de items
         "cogs.taberna", # Minijuegos de apuestas con la Casa
-        "cogs.botin"    # Loot tables para DMs
+        "cogs.botin",   # Loot tables para DMs
+        "cogs.asteria_cog" # Ecosistema Asteria (Integración Reactivada)
     ]
 
     print("🔌 Cargando módulos del sistema de forma síncrona...")
