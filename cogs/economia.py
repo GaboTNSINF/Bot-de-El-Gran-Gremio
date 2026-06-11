@@ -146,11 +146,11 @@ class EconomiaCog(commands.Cog):
             personal_rama = await database.obtener_personal_division(key_rama)
             if personal_rama:
                 for empleado in personal_rama:
-                    user_str = str(empleado["user_id"])
+                    u_id = int(empleado["user_id"])
                     rango = empleado["rango_interno"].lower()
                     sueldo_asignado = escala_salarial.get(rango, 10000)
 
-                    pagos_pendientes[user_str] = pagos_pendientes.get(user_str, 0) + sueldo_asignado
+                    pagos_pendientes[u_id] = pagos_pendientes.get(u_id, 0) + sueldo_asignado
                     total_empleados_pagados += 1
                     total_gasto_pc += sueldo_asignado
 
@@ -162,8 +162,8 @@ class EconomiaCog(commands.Cog):
         try:
             async with database.db_lock:
                 await database._connection.execute("BEGIN")
-                # 1. Comprobar liquidez de la Bóveda Central ('0')
-                async with database._connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = '0'") as cursor:
+                # 1. Comprobar liquidez de la Bóveda Central (0)
+                async with database._connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = 0") as cursor:
                     boveda = await cursor.fetchone()
                     if not boveda or boveda["balance_pc"] < total_gasto_pc:
                         await database._connection.rollback()
@@ -172,17 +172,17 @@ class EconomiaCog(commands.Cog):
 
                 # 2. Restar el bloque masivo a la bóveda
                 await database._connection.execute(
-                    "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = '0'",
+                    "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0",
                     (total_gasto_pc,)
                 )
 
                 # 3. Iterar inserciones seguras (Transacción Bifurcada Retrocompatible V6)
-                for user_id_str, monto in pagos_pendientes.items():
-                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id_str,))
-                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (user_id_str,))
+                for u_id, monto in pagos_pendientes.items():
+                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (u_id,))
+                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (u_id,))
                     await database._connection.execute(
                         "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
-                        (monto, user_id_str)
+                        (monto, u_id)
                     )
                 await database._connection.commit()
         except Exception as e:

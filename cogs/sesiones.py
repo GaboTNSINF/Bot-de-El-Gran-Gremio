@@ -15,9 +15,16 @@ class VistaEncuestaDM(discord.ui.View):
 
     async def procesar_voto_por_contexto(self, interaction: discord.Interaction, valor: int, label_voto: str):
         try:
-            # Recuperar el ID del DM inyectado en el footer del Embed
-            dm_id_str = interaction.message.embeds[0].footer.text.replace("DM-ID:", "")
-            dm_id = int(dm_id_str)
+            # Recuperar el ID del DM inyectado en el footer del Embed de manera defensiva
+            if not interaction.message.embeds or not interaction.message.embeds[0].footer or not interaction.message.embeds[0].footer.text:
+                raise ValueError("Embed o footer faltante")
+
+            footer_text = interaction.message.embeds[0].footer.text
+            match = re.search(r"DM-ID:\s*(\d+)", footer_text)
+            if not match:
+                raise ValueError("Formato de DM-ID no encontrado")
+
+            dm_id = int(match.group(1))
         except (IndexError, ValueError, AttributeError):
             await interaction.response.send_message("❌ **Error de Integridad:** Los metadatos de esta encuesta están corruptos o el embed fue alterado.", ephemeral=True)
             return
@@ -105,14 +112,19 @@ class ModalRecompensasGlobales(discord.ui.Modal):
             await interaction.followup.send("❌ El ID del Anillo Geográfico debe ser un número entero válido.", ephemeral=True)
             return
 
+        # Limpiar ID del objeto recompensa (normalizar) antes de abrir transacción para evitar TOCTOU/retenciones largas
+        obj_norm = None
+        if objeto_id:
+            obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
+
         # REFACTOR V5: Ejecución Atómica
         try:
             async with database.db_lock:
                 await database._connection.execute("BEGIN")
                 for j in self.jugadores:
-                    j_str = str(j.id)
+                    j_id = int(j.id)
                     # Lazy init
-                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (j_str,))
+                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (j_id,))
 
                     # Calcular extenuación: Si falló la salvación de Const, sumar 1
                     extenuacion_mod = 0 if self.salvaciones.get(j.id, True) else 1
@@ -125,18 +137,16 @@ class ModalRecompensasGlobales(discord.ui.Modal):
                             nivel_extenuacion = nivel_extenuacion + ?,
                             anillo_geografico_id = ?
                         WHERE user_id = ?
-                    """, (extenuacion_mod, anillo_id, j_str))
+                    """, (extenuacion_mod, anillo_id, j_id))
 
                     # Inyectar PC a la billetera (Transacción Bifurcada Retrocompatible V6)
-                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (j_str,))
-                    await database._connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (pc_totales, j_str))
+                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (j_id,))
+                    await database._connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (pc_totales, j_id))
 
-                    # Opcional: Inyectar ítem si se dio ID
-                    if objeto_id:
-                        # Limpiar ID (normalizar)
-                        obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
-                        await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_str, obj_norm))
-                        await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_str, obj_norm))
+                    # Opcional: Inyectar ítem si se dio ID (ya normalizado arriba)
+                    if obj_norm:
+                        await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_id, obj_norm))
+                        await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_id, obj_norm))
                 await database._connection.commit()
         except Exception as e:
             async with database.db_lock:
