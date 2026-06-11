@@ -2,36 +2,25 @@
 
 import aiosqlite
 import os
+import asyncio
 
 # Determinar la ruta absoluta del directorio donde reside este archivo de forma dinámica
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Unir la ruta para que la base de datos se aloje e inicialice estrictamente en tu carpeta de proyecto
 DB_PATH = os.path.join(BASE_DIR, "gremio.db")
 
-import asyncio
-
-# Tubería de conexión global persistente en memoria RAM para evitar bloqueos de disco
-# NOTA EDUCATIVA: Usamos una conexión persistente para no estar abriendo y cerrando
-# el archivo de la base de datos en cada comando, lo que en un VPS causaría lentitud y errores.
+# Tubería de conexión global persistente
 _connection = None
 
-# Lock Global de Exclusión Mutua para serializar transacciones de escritura y prevenir colisiones (Race Conditions).
-# Este candado envolverá los bloques BEGIN/COMMIT sin bloquear las lecturas asíncronas del modo WAL.
+# Lock Global de Exclusión Mutua para serializar transacciones de escritura.
 db_lock = asyncio.Lock()
 
 async def init_db():
-    """Inicializa el pool de conexiones persistentes y forja las tablas del reino."""
+    """Inicializa la conexión persistente y forja las entidades relacionales."""
     global _connection
-    # NOTA EDUCATIVA: Solo nos conectamos si no hay una conexión activa, esto previene
-    # sobrescribir la conexión y dejar "conexiones fantasma" que bloquean la base de datos (Database is locked).
     if _connection is None:
         _connection = await aiosqlite.connect(DB_PATH)
-        # Habilitar soporte para llaves foráneas y optimizaciones de velocidad en SQLite
         await _connection.execute("PRAGMA foreign_keys = ON")
-        # NOTA EDUCATIVA: El modo WAL (Write-Ahead Logging) permite que SQLite lea y escriba
-        # al mismo tiempo. Es FUNDAMENTAL para un bot de Discord asíncrono para que no se congele.
         await _connection.execute("PRAGMA journal_mode = WAL")
-        # Cambiar el formato de retorno a diccionarios por defecto para evitar errores de índice
         _connection.row_factory = aiosqlite.Row
 
     # 1. Tabla de Aventureros
@@ -49,7 +38,7 @@ async def init_db():
         )
     """)
     
-    # --- MOTOR AUTOMÁTICO DE MIGRACIÓN ---
+    # Motor de migración interna de aventureros
     async with _connection.execute("PRAGMA table_info(aventureros)") as cursor:
         columnas_existentes = [columna["name"] for columna in await cursor.fetchall()]
     
@@ -58,10 +47,9 @@ async def init_db():
     if "sesiones_jugadas" not in columnas_existentes:
         await _connection.execute("ALTER TABLE aventureros ADD COLUMN sesiones_jugadas INTEGER DEFAULT 0")
 
-    # Índice para acelerar el cálculo del Ladder de Aventureros (Optimización de Bolt ⚡)
     await _connection.execute("CREATE INDEX IF NOT EXISTS idx_aventureros_ladder ON aventureros (nivel DESC, sesiones_jugadas DESC)")
 
-    # 2. Tabla Base: Sistema de Matchmaking
+    # 2. Sistema de Matchmaking
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS matchmaking (
             user_id INTEGER PRIMARY KEY,
@@ -73,7 +61,7 @@ async def init_db():
         )
     """)
 
-    # 3. Tabla: Registro de licencias de los Dungeon Masters
+    # 3. Registro de Dungeon Masters
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS registro_dms (
             dm_id INTEGER PRIMARY KEY,
@@ -83,7 +71,7 @@ async def init_db():
         )
     """)
 
-    # 4. Tabla: Reputación por Urna Transaccional Anónima
+    # 4. Urna Transaccional Anónima (Reseñas)
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS reseñas_dms (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,13 +82,10 @@ async def init_db():
         )
     """)
 
-    # Índice para acelerar las búsquedas por dm_id en reseñas (Optimización de Bolt ⚡)
     await _connection.execute("CREATE INDEX IF NOT EXISTS idx_resenas_dm_id ON reseñas_dms (dm_id)")
-
-    # Índice para acelerar la extracción del Top de DMs (Optimización de Bolt ⚡)
     await _connection.execute("CREATE INDEX IF NOT EXISTS idx_dms_partidas ON registro_dms (partidas_narradas DESC)")
 
-    # 5. Tabla de Control de Anclas de Embeds Fijos
+    # 5. Control de Anclas de Embeds
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS control_nominas (
             seccion TEXT PRIMARY KEY,
@@ -109,7 +94,7 @@ async def init_db():
         )
     """)
 
-    # 6. Tabla de Registro de Personal por Rama Administrative
+    # 6. Personal Administrativo
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS personal_ramas (
             user_id INTEGER PRIMARY KEY,
@@ -118,7 +103,7 @@ async def init_db():
         )
     """)
     
-    # 7. Tabla de Balances Bancarios
+    # 7. Balances Legacy
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS cuentas_bancarias (
             id_entidad INTEGER PRIMARY KEY, 
@@ -126,7 +111,7 @@ async def init_db():
         )
     """)
 
-    # 8. Tabla de Productos de la Tienda
+    # 8. Catálogo de Tienda
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS tienda_productos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,7 +123,7 @@ async def init_db():
         )
     """)
 
-    # Tabla de auditoría histórica independiente e hijas relacionales
+    # 9. Infraestructura del Histórico Relacional Padre-Hijo (Anti-Colisiones Estocásticas)
     await _connection.executescript("""
         CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,7 +145,7 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_auditoria_sesiones_jugadores_auditoria ON auditoria_sesiones_jugadores(auditoria_id);
     """)
 
-    # SCHEMA V3 CANÓNICO ASTERIA: Inyectamos las nuevas tablas de infraestructura Trustless
+    # SCHEMA V3 CANÓNICO ASTERIA: Infraestructura Trustless Normalizada
     await _connection.executescript("""
         CREATE TABLE IF NOT EXISTS matriz_recompensas (
             rango_dm VARCHAR(20) NOT NULL,
@@ -216,43 +201,42 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_registro_recetas_user ON registro_recetas_conocidas(user_id);
     """)
 
-    # 9. Inventarios y pertenencias (Legacy: Mantenida para compatibilidad con código no refactorizado temporalmente)
+    # Inventarios Legacy
     await _connection.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             producto_nombre TEXT NOT NULL,
             cantidad INTEGER DEFAULT 1,
-            origen TEXT DEFAULT 'tienda', -- 'tienda' o 'nivel20' (Para marcar lo sincronizado)
+            origen TEXT DEFAULT 'tienda',
             FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
         )
     """)
 
-    # --- PUENTE DE RETROCOMPATIBILIDAD ANILLO GEOGRÁFICO ---
+    # Puente de Retrocompatibilidad de Esquema
     async with _connection.execute("PRAGMA table_info(personajes_estados)") as cursor:
         columnas_estados = [columna["name"] for columna in await cursor.fetchall()]
 
     if "anillo_geografico_id" not in columnas_estados:
         await _connection.execute("ALTER TABLE personajes_estados ADD COLUMN anillo_geografico_id INTEGER DEFAULT NULL")
-        print("🔧 [MIGRACIÓN] Inyectada columna 'anillo_geografico_id' en 'personajes_estados'")
 
-    # --- MIGRACIÓN ATÓMICA DE DATOS (PORTEO V3 CONDICIONADO) ---
+    # Rutinas de Migración y Porteo Atómico Histórico
     async with _connection.execute("PRAGMA user_version") as cursor:
         version_db = (await cursor.fetchone())[0]
 
     if version_db < 1:
-        # Lazy Bridge puente de seguridad para inicialización de inventarios (Mitiga IntegrityError FK)
-        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) SELECT DISTINCT user_id FROM inventarios")
-
-        # Lazy Bridge para foráneas
         await _connection.execute("""
             INSERT OR IGNORE INTO personajes_estados (user_id)
             SELECT id_entidad FROM cuentas_bancarias;
         """)
-        # Bóveda Central (ID 0)
         await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0);")
 
-        # Porteo de Economía In-Place a economia_billetera (Transacción Bifurcada Retrocompatible)
+        # BLINDAJE DE INTEGRIDAD: Prevenir violaciones de Foreign Key de usuarios inexistentes en tabla maestra
+        await _connection.execute("""
+            INSERT OR IGNORE INTO personajes_estados (user_id)
+            SELECT DISTINCT user_id FROM inventarios;
+        """)
+
         await _connection.execute("""
             INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc)
             SELECT id_entidad, 0 FROM cuentas_bancarias;
@@ -266,13 +250,11 @@ async def init_db():
             WHERE user_id IN (SELECT id_entidad FROM cuentas_bancarias);
         """)
 
-        # Porteo de Inventario Legacy a Materiales (Transacción Bifurcada Retrocompatible)
         await _connection.execute("""
             INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad)
             SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_'), 0
             FROM inventarios;
         """)
-        # Usamos una sumatoria para evitar problemas si el inventario legacy ya tenía items repetidos.
         await _connection.execute("""
             UPDATE inventario_materiales
             SET cantidad = cantidad + (
@@ -286,10 +268,10 @@ async def init_db():
         """)
 
         await _connection.execute("PRAGMA user_version = 1")
-        print("🔧 [MIGRACIÓN] Ejecutado el porteo histórico V3 (Economía e Inventarios). PRAGMA user_version actualizado a 1.")
+        print("🔧 [MIGRACIÓN] Ejecutado el porteo histórico V3 sin oclusiones relacionales.")
 
-    # 10. Tablas para información mecánica de la hoja de personaje extraída de Nivel20
-    await _connection.execute("""
+    # Tablas Mecánicas de Nivel20
+    await _connection.executescript("""
         CREATE TABLE IF NOT EXISTS ficha_estadisticas (
             user_id INTEGER PRIMARY KEY,
             fuerza INTEGER NOT NULL,
@@ -302,75 +284,52 @@ async def init_db():
             velocidad TEXT NOT NULL,
             competencia TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-        )
-    """)
+        );
 
-    await _connection.execute("""
         CREATE TABLE IF NOT EXISTS ficha_clases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             clase TEXT NOT NULL,
             nivel INTEGER NOT NULL,
             FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-        )
-    """)
+        );
 
-    await _connection.execute("""
         CREATE TABLE IF NOT EXISTS ficha_rasgos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             nombre TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-        )
-    """)
+        );
 
-    await _connection.execute("""
         CREATE TABLE IF NOT EXISTS ficha_conjuros (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             nombre TEXT NOT NULL,
             nivel TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-        )
+        );
     """)
 
-    # Para facilitar las actualizaciones estructurales
-    # Si la tabla ya existe y no tiene la columna 'origen', la agregamos dinámicamente.
     try:
         await _connection.execute("ALTER TABLE inventarios ADD COLUMN origen TEXT DEFAULT 'tienda'")
     except Exception:
-        pass # La columna ya existe
+        pass
 
     await _connection.commit()
     
-    # REFACTORIZACIÓN FINAL DE TESORERÍA EN init_db()
-    try:
-        async with db_lock:
+    # Inicialización de la Bóveda Central (Protegida)
+    async with db_lock:
+        try:
             await _connection.execute("BEGIN")
-            # 1. Garantizar la existencia física de la Bóveda Central en la tabla canónica V3
-            await _connection.execute(
-            "INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 20000000)"
-            )
-
-            # 2. Si la base de datos es heredada y posee un balance menor al buffer de seguridad,
-            # se reajusta automáticamente a 20,000,000 pc (20,000 pp) sin alterar el circulante.
-            await _connection.execute(
-            "UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = 0 AND balance_pc < 20000000"
-            )
+            await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 20000000)")
+            await _connection.execute("UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = 0 AND balance_pc < 20000000")
             await _connection.commit()
-        print("💰 [TESORERÍA] Bóveda Central canonicalizada y estabilizada en 20,000,000 pc (20,000 pp) en economia_billetera.")
-    except Exception as e:
-        # En caso de error, aseguramos el rollback.
-        # (El rollback no requiere lock, o puede ir dentro del except con lock, pero
-        # ya que el error aborta el bloque `async with db_lock`, necesitamos hacer rollback aparte
-        # para que la conexion se libere, pero como `_connection.execute("BEGIN")` podría haber
-        # fallado, o algo dentro lo hizo, debemos re-adquirir el lock para el rollback o hacerlo
-        # directamente.)
-        async with db_lock:
+            print("💰 [TESORERÍA] Bóveda Central canonicalizada y estabilizada.")
+        except Exception as e:
             await _connection.rollback()
-        print(f"❌ Error Crítico al inicializar la Bóveda Central en economia_billetera: {e}")
+            print(f"❌ Error Crítico al inicializar la Bóveda Central: {e}")
 
-# --- MÓDULO DE CONSULTAS OPTIMIZADAS ---
+# --- CONSULTAS OPTIMIZADAS ---
 
 async def obtener_personaje(user_id: int):
     async with _connection.execute(
@@ -430,7 +389,6 @@ async def editar_datos_personaje(user_id: int, name: str, race: str, char_class:
     return True
 
 async def obtener_perfil_dm(dm_id: int):
-    # OPTIMIZACIÓN SENIOR: Consolidación de datos de perfil y agregación de reseñas en una única consulta relacional limpia
     query = """
         SELECT 
             d.nombre_dm, d.rango_licencia, d.partidas_narradas,
@@ -464,8 +422,6 @@ async def obtener_ladder_aventureros():
         return await cursor.fetchall()
 
 async def obtener_ladder_dms():
-    # SOLUCIÓN COMPLETA AL ANTIPATRÓN N+1 (Optimizada por Bolt ⚡):
-    # Extraer el Top 10 ANTES de hacer el LEFT JOIN masivo O(N*M) con todas las reseñas del servidor
     query = """
         SELECT 
             d.dm_id, d.nombre_dm, d.rango_licencia, d.partidas_narradas,
@@ -513,11 +469,6 @@ async def obtener_personal_division(division: str):
         return await cursor.fetchall()
 
 async def obtener_candidatos_compatibles_dm(dm_id: int, limite_jugadores: int):
-    """
-    Extrae de forma atómica únicamente los jugadores que cumplen con la ventana 
-    temporal mínima (3 horas) y las restricciones de nivel del DM evaluado.
-    """
-    # 1. Obtener los parámetros específicos de tiempo del DM
     async with _connection.execute(
         "SELECT hora_inicio_utc, hora_fin_utc FROM matchmaking WHERE user_id = ? AND rol_busqueda = 'dm'", 
         (dm_id,)
@@ -529,10 +480,6 @@ async def obtener_candidatos_compatibles_dm(dm_id: int, limite_jugadores: int):
     dm_ini = dm_datos["hora_inicio_utc"]
     dm_fin = dm_datos["hora_fin_utc"]
 
-    # 2. Consulta de filtrado industrial mediante álgebra relacional en SQLite
-    # Determina la coincidencia horaria (intersección >= 180 minutos) en una sola pasada de disco
-    # BLINDAJE: Consideramos los ciclos cruzados de la medianoche (ej: un turno que empieza a las 22:00 y acaba a las 02:00).
-    # Si fin < inicio, le sumamos 24h (1440 mins) tanto en Python como en SQL.
     if dm_fin <= dm_ini:
         dm_fin += 1440
 
@@ -542,17 +489,15 @@ async def obtener_candidatos_compatibles_dm(dm_id: int, limite_jugadores: int):
         JOIN aventureros a ON m.user_id = a.user_id
         WHERE m.rol_busqueda = 'jugador'
           AND (
-              -- Calculamos la intersección de horas sumando 1440 minutos si cruzan la medianoche
               MIN(CASE WHEN m.hora_fin_utc <= m.hora_inicio_utc THEN m.hora_fin_utc + 1440 ELSE m.hora_fin_utc END, ?)
               -
               MAX(m.hora_inicio_utc, ?)
           ) >= 180
     """
-    
     async with _connection.execute(query, (dm_fin, dm_ini)) as cursor:
         return await cursor.fetchall()
 
-# --- INFRAESTRUCTURA CONTABLE ATÓMICA (ALTERNATIVAB) ---
+# --- INFRAESTRUCTURA BANCARIA CONTROLADA (BLINDAJE DE CONCURRENCIA SANEADO) ---
 
 async def obtener_balance(id_entidad: int) -> int:
     async with _connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (id_entidad,)) as cursor:
@@ -565,36 +510,26 @@ async def inyectar_fondos_ignorados(dm_id: int, nombre_dm: str, valor: int, labe
     await _connection.commit()
 
 async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) -> bool:
-    """Ejecuta una transferencia bancaria P2P atómica puramente controlada por el motor de SQLite."""
-    # BLINDAJE EXTRA: Evitamos que una persona pueda enviarse dinero negativo para sumar saldo mágicamente a su cuenta.
     if cantidad_pc <= 0:
         return False
 
-    # REFACTOR V5: Transacciones explícitas para portabilidad segura en Schema V3
     async with db_lock:
         try:
             await _connection.execute("BEGIN")
-            # Lazy Init para ambos
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (emisor_id,))
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
-
             await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (emisor_id,))
             await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
 
-            # 2. Deducción condicionada en el WHERE
             async with _connection.execute(
                 "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = ? AND balance_pc >= ?",
                 (cantidad_pc, emisor_id, cantidad_pc)
             ) as cursor:
                 if cursor.rowcount == 0:
                     await _connection.rollback()
-                    return False  # El emisor no cuenta con los fondos requeridos. Abortado, se activa Rollback manual.
+                    return False
 
-            # 3. Inyección al receptor
-            await _connection.execute(
-                "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
-                (cantidad_pc, receptor_id)
-            )
+            await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_id))
             await _connection.commit()
             return True
         except Exception:
@@ -602,25 +537,21 @@ async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) 
             return False
 
 async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
-    """Extrae fondos directamente de la Bóveda del Gremio (id 0) bajo validación atómica estructural V3."""
-    
     async with db_lock:
         try:
             await _connection.execute("BEGIN")
-            # Lazy init
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
             await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
             await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
 
-            # Restar de la bóveda
             async with _connection.execute(
                 "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0 AND balance_pc >= ?",
                 (cantidad_pc, cantidad_pc)
             ) as cursor:
                 if cursor.rowcount == 0:
                     await _connection.rollback()
-                    return False  # Bóveda sin liquidez
+                    return False
 
             await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_id))
             await _connection.commit()
@@ -632,7 +563,6 @@ async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
 # --- TIENDA E INVENTARIOS ---
 
 async def obtener_catalogo():
-    # NOTA EDUCATIVA: Retornamos todos los productos para reconstruir el catálogo en memoria.
     async with _connection.execute("SELECT nombre, precio_str, costo_pc, categoria, descripcion FROM tienda_productos") as cursor:
         return await cursor.fetchall()
 
@@ -650,11 +580,10 @@ async def eliminar_producto_db(nombre: str) -> bool:
     return exito
 
 async def migrar_catalogo_inicial(catalogo_base: dict):
-    """Inserta el catálogo inicial por defecto si la tienda está vacía."""
     async with _connection.execute("SELECT COUNT(*) as cuenta FROM tienda_productos") as cursor:
         row = await cursor.fetchone()
         if row and row["cuenta"] > 0:
-            return  # Ya hay productos, no migrar
+            return
 
     for categoria, items in catalogo_base.items():
         for item in items:
@@ -665,10 +594,6 @@ async def migrar_catalogo_inicial(catalogo_base: dict):
     await _connection.commit()
 
 async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: str = 'tienda'):
-    """
-    Suma 1 a la cantidad de un producto en el inventario del usuario V3 (Solo materiales apilables).
-    Si no existe, lo crea.
-    """
     item_id = producto_nombre.lower().replace(" ", "_")
     async with db_lock:
         try:
@@ -676,7 +601,6 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: st
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
 
             if origen == 'nivel20':
-                # Sincronización de solo lectura, no modificamos SQLite según Schema V3
                 await _connection.commit()
                 return
 
@@ -694,7 +618,6 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: st
             print(f"Error agregando item: {e}")
 
 async def obtener_inventario_usuario(user_id: int):
-    # Reconstruimos la salida legacy uniendo ambas tablas V3
     async with _connection.execute("""
         SELECT 0 as id, item_id as producto_nombre, cantidad, 'tienda' as origen
         FROM inventario_materiales WHERE user_id = ?
@@ -702,11 +625,7 @@ async def obtener_inventario_usuario(user_id: int):
         return await cursor.fetchall()
 
 async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
-    """
-    Resta 1 a la cantidad del producto. Si llega a 0, se elimina del inventario (V3).
-    """
     item_id = producto_nombre.lower().replace(" ", "_")
-
     async with db_lock:
         try:
             await _connection.execute("BEGIN")
@@ -725,15 +644,9 @@ async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
             await _connection.rollback()
             return False
 
-# --- LÓGICA DE FICHA NIVEL20 ---
+# --- FICHA NIVEL20 ---
 
 async def guardar_datos_ficha_nivel20(user_id: int, stats: dict):
-    """
-    Guarda o actualiza todos los datos extraídos de Nivel20.
-    stats es un dict con: fuerza, destreza, constitucion, inteligencia, sabiduria, carisma,
-    iniciativa, velocidad, competencia, clases (list de dicts), rasgos (list), conjuros (list de dicts), equipo (list)
-    """
-    # 1. Estadísticas Base
     await _connection.execute("DELETE FROM ficha_estadisticas WHERE user_id = ?", (user_id,))
     await _connection.execute("""
         INSERT INTO ficha_estadisticas (user_id, fuerza, destreza, constitucion, inteligencia, sabiduria, carisma, iniciativa, velocidad, competencia)
@@ -744,29 +657,21 @@ async def guardar_datos_ficha_nivel20(user_id: int, stats: dict):
         stats.get('iniciativa', '+0'), stats.get('velocidad', '30 pies'), stats.get('competencia', '+2')
     ))
 
-    # 2. Clases
     await _connection.execute("DELETE FROM ficha_clases WHERE user_id = ?", (user_id,))
     for c in stats.get('clases', []):
         await _connection.execute("INSERT INTO ficha_clases (user_id, clase, nivel) VALUES (?, ?, ?)", (user_id, c['nombre'], c['nivel']))
 
-    # 3. Rasgos
     await _connection.execute("DELETE FROM ficha_rasgos WHERE user_id = ?", (user_id,))
     for r in stats.get('rasgos', []):
         await _connection.execute("INSERT INTO ficha_rasgos (user_id, nombre) VALUES (?, ?)", (user_id, r))
 
-    # 4. Conjuros
     await _connection.execute("DELETE FROM ficha_conjuros WHERE user_id = ?", (user_id,))
     for conjuro in stats.get('conjuros', []):
         await _connection.execute("INSERT INTO ficha_conjuros (user_id, nombre, nivel) VALUES (?, ?, ?)", (user_id, conjuro['nombre'], conjuro['nivel']))
 
-    # 5. Equipo (Marcando origen='nivel20')
-    # REFACTOR V5: Según las directivas Trustless V3, ignoramos por completo el inventario de Nivel20
-    # y ya no sincronizamos objetos provenientes de la ficha de lectura externa.
-
     await _connection.commit()
 
 async def obtener_datos_ficha_completos(user_id: int):
-    """Devuelve un diccionario con todas las estadísticas vinculadas."""
     datos = {}
     async with _connection.execute("SELECT * FROM ficha_estadisticas WHERE user_id = ?", (user_id,)) as cursor:
         row = await cursor.fetchone()
@@ -785,10 +690,9 @@ async def obtener_datos_ficha_completos(user_id: int):
 
     return datos
 
-# --- HERRAMIENTAS DE CONTROL FISCAL (INCAUTACIÓN) ---
+# --- CONTROLES FISCALES ---
 
 async def embargar_fondos(user_id: int) -> int:
-    """Extrae la totalidad de los fondos de un usuario y los inyecta en la Bóveda Central (id 0) (V3)."""
     async with db_lock:
         try:
             await _connection.execute("BEGIN")
@@ -800,11 +704,8 @@ async def embargar_fondos(user_id: int) -> int:
                 saldo_recuperado = row["balance_pc"]
 
             await _connection.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id = ?", (user_id,))
-
-            # Asegurar boveda
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
             await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
-
             await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_recuperado,))
             await _connection.commit()
             return saldo_recuperado
@@ -813,7 +714,6 @@ async def embargar_fondos(user_id: int) -> int:
             return 0
 
 async def embargo_masivo() -> int:
-    """Wipe económico total V3: Transfiere todos los fondos de los jugadores a la Bóveda Central."""
     async with db_lock:
         try:
             await _connection.execute("BEGIN")
@@ -825,10 +725,8 @@ async def embargo_masivo() -> int:
 
             if saldo_total_recuperado > 0:
                 await _connection.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id != 0")
-
                 await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
                 await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
-
                 await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_total_recuperado,))
 
             await _connection.commit()
@@ -836,7 +734,6 @@ async def embargo_masivo() -> int:
         except Exception:
             await _connection.rollback()
             return 0
-
 
 async def cerrar_db():
     global _connection

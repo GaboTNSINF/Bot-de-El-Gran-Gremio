@@ -9,7 +9,6 @@ class EconomiaCog(commands.Cog):
     """Módulo maestro encargado de la lógica transaccional y el control bancario del Gremio."""
     def __init__(self, bot):
         self.bot = bot
-        # Mapeo estático centralizado para el renderizado unificado de divisas en los Embeds
         self.DIVISAS_METADATA = {
             "platino": {"emoji": "🪙", "sigla": "pp", "nombre": "Platino"},
             "oro":     {"keys": "🥇", "sigla": "po", "nombre": "Oro"},
@@ -18,7 +17,6 @@ class EconomiaCog(commands.Cog):
         }
 
     def _convertir_a_cobre(self, moneda: str, cantidad: int) -> int:
-        """Helper analítico que normaliza cualquier divisa a piezas de cobre brutas."""
         escalares = {
             "cobre": 1,
             "plata": 10,
@@ -28,7 +26,6 @@ class EconomiaCog(commands.Cog):
         return cantidad * escalares.get(moneda.lower(), 1)
 
     def _desglosar_cobre(self, total_cobre: int) -> str:
-        """Helper matemático que realiza la división modular para formatear los monederos."""
         cobre_restante = total_cobre
         platino = cobre_restante // 1000
         cobre_restante %= 1000
@@ -68,7 +65,6 @@ class EconomiaCog(commands.Cog):
             await ctx.respond("❌ **Error Analítico:** Los bots carecen de estado financiero.", ephemeral=True)
             return
 
-        # UX SENIOR: Si consultas tu propio dinero es efímero (privado), si auditas a otro es público
         es_efimero = True if aventurero is None else False
         await ctx.response.defer(ephemeral=es_efimero)
         
@@ -87,23 +83,14 @@ class EconomiaCog(commands.Cog):
         
         await ctx.followup.send(embed=embed)
 
-
-    # =========================================================================
-    # 👑 COMANDO SUPREMO: EMISIÓN DE FONDOS DESDE LA RESERVA (SUELDOS/SUBSIDIOS)
-    # =========================================================================
-
     @commands.slash_command(name="emitir_nominas", description="[SUPREME] Emite los sueldos de todo el personal gremial registrado en nómina de forma masiva.")
     async def emitir_nominas(self, ctx: discord.ApplicationContext):
         if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado:** Solo los Fundadores pueden ejecutar el pago de nóminas masivo.", ephemeral=True)
             return
 
-        # NOTA EDUCATIVA: Retrasamos la respuesta porque esta operación es "pesada"
-        # (va a leer toda la base de datos de personal y ejecutar decenas de updates).
         await ctx.response.defer(ephemeral=False)
 
-        # Matriz de Sueldos Semanales (En piezas de cobre brutas para inyección directa)
-        # Puedes balancear estos montos a futuro. Ej: 50000 pc = 50 po.
         escala_salarial = {
             "jefe": 60000,
             "supervisor": 50000,
@@ -123,23 +110,17 @@ class EconomiaCog(commands.Cog):
 
         total_empleados_pagados = 0
         total_gasto_pc = 0
+        pagos_pendientes = {}
 
-        # REFACTOR V5: Optimización Industrial. Evitamos llamar N veces a emitir_fondos_reserva (que abría N transacciones)
-        # Pre-calculamos todo en memoria (Python) y luego lo disparamos a SQLite en una sola transacción atómica.
-        pagos_pendientes = {} # {user_id_str: cantidad_pc}
-
-        # Recuperar y pagar a todos por cada rama registrada en el bot
         for key_rama, datos_rama in config.CONFIG_RAMAS.items():
-            # 1. PAGO A LA JEFATURA (Extraído del Rol de Discord, no de la BD)
             rol_jefe = ctx.guild.get_role(datos_rama["jefe_id"])
             if rol_jefe:
                 for jefe in rol_jefe.members:
                     sueldo_jefe = escala_salarial["jefe"]
-                    pagos_pendientes[str(jefe.id)] = pagos_pendientes.get(str(jefe.id), 0) + sueldo_jefe
+                    pagos_pendientes[int(jefe.id)] = pagos_pendientes.get(int(jefe.id), 0) + sueldo_jefe
                     total_empleados_pagados += 1
                     total_gasto_pc += sueldo_jefe
 
-            # 2. PAGO AL ESCALAFÓN OPERATIVO (Extraído de la BD mediante /contratar)
             personal_rama = await database.obtener_personal_division(key_rama)
             if personal_rama:
                 for empleado in personal_rama:
@@ -152,28 +133,24 @@ class EconomiaCog(commands.Cog):
                     total_gasto_pc += sueldo_asignado
 
         if total_empleados_pagados == 0:
-            await ctx.followup.send("📝 **Nómina vacía:** No hay personal registrado en los libros del Gremio para cobrar sueldo.")
+            await ctx.followup.send("📝 **Nómina vacía:** No hay personal registrado en los libros del Gremio.")
             return
 
-        # Ejecución Industrial en Base de Datos (1 sola transacción para N usuarios)
         async with database.db_lock:
             try:
                 await database._connection.execute("BEGIN")
-                # 1. Comprobar liquidez de la Bóveda Central (0)
                 async with database._connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = 0") as cursor:
                     boveda = await cursor.fetchone()
                     if not boveda or boveda["balance_pc"] < total_gasto_pc:
                         await database._connection.rollback()
-                        await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda (ID 0) no tiene liquidez ({boveda['balance_pc'] if boveda else 0} pc) para cubrir la nómina de {total_gasto_pc} pc. Abortado.")
+                        await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda no tiene liquidez. Abortado.")
                         return
 
-                # 2. Restar el bloque masivo a la bóveda
                 await database._connection.execute(
                     "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0",
                     (total_gasto_pc,)
                 )
 
-                # 3. Iterar inserciones seguras (Transacción Bifurcada Retrocompatible V6)
                 for u_id, monto in pagos_pendientes.items():
                     await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (u_id,))
                     await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (u_id,))
@@ -184,10 +161,8 @@ class EconomiaCog(commands.Cog):
                 await database._connection.commit()
             except Exception as e:
                 await database._connection.rollback()
-                await ctx.followup.send(f"❌ **Error Crítico de Dispersión:** {e}. Se ha ejecutado un Rollback manual.")
+                await ctx.followup.send(f"❌ **Error Crítico de Dispersión:** {e}. Rollback ejecutado.")
                 return
-
-        # Reporte final
 
         embed = discord.Embed(
             title="🏦 INFORME DE TESORERÍA: NÓMINAS EMITIDAS",
@@ -196,8 +171,6 @@ class EconomiaCog(commands.Cog):
         )
         embed.add_field(name="👥 Personal Remunerado", value=f"`{total_empleados_pagados}` trabajadores", inline=True)
         embed.add_field(name="💸 Gasto Total Gremial", value=f"`{total_gasto_pc:,} pc` deducidos de la Bóveda", inline=True)
-        embed.set_footer(text="Los sueldos ya han sido depositados en las cuentas corrientes de los jugadores.")
-
         await ctx.followup.send(embed=embed)
 
     @commands.slash_command(name="banco_emitir", description="[SUPREME] Inyecta fondos a un usuario desde la Bóveda Central.")
@@ -217,48 +190,33 @@ class EconomiaCog(commands.Cog):
             await ctx.respond("❌ **Acceso Denegado:** Requiere credenciales de la Alta Directiva Suprema.", ephemeral=True)
             return
 
-        # BLINDAJE DE ECONOMÍA: Filtro de seguridad que valida que la cantidad ingresada sea positiva,
-        # esto previene que un admin por error ingrese un negativo e intercepte fondos del usuario.
         if cantidad <= 0:
-            await ctx.respond("❌ **Error Transaccional:** La cantidad a emitir debe ser estrictamente mayor a cero.", ephemeral=True)
+            await ctx.respond("❌ **Error Transaccional:** La cantidad debe ser mayor a cero.", ephemeral=True)
             return
 
-        # NOTA EDUCATIVA: Retrasamos el envío de respuesta de Discord (defer) para evitar
-        # que el comando diga "La aplicación no respondió" si la base de datos se demora.
         await ctx.response.defer(ephemeral=True)
         cobre_bruto = self._convertir_a_cobre(moneda, cantidad)
 
-        # Transacción atómica blindada (Alternativa B en Base de Datos)
         exito = await database.emitir_fondos_reserva(usuario.id, cobre_bruto)
-
         if not exito:
-            await ctx.followup.send("❌ **Bancarrota Técnica:** La Bóveda Central del Gremio no dispone de fondos suficientes para cubrir esta emisión.", ephemeral=True)
+            await ctx.followup.send("❌ **Bancarrota Técnica:** La Bóveda Central no dispone de fondos suficientes.", ephemeral=True)
             return
 
-        await ctx.followup.send(f"✅ Has emitido exitosamente `{cantidad} {moneda}` desde las arcas del Gremio hacia la cuenta de {usuario.name}.", ephemeral=True)
+        await ctx.followup.send(f"✅ Has emitido `{cantidad} {moneda}` desde las arcas del Gremio.", ephemeral=True)
 
-        # Envío silencioso al canal de Auditoría
-        canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
         canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
         if canal_logs:
             embed_log = discord.Embed(
                 title="📜 AUDITORÍA: EMISIÓN DE FONDOS",
                 description=f"**Ejecutivo:** {ctx.user.mention}\n"
                             f"**Receptor:** {usuario.mention}\n"
-                            f"**Monto Emitido:** `{cantidad} {moneda.upper()}`\n"
-                            f"**Concepto:** Financiamiento Oficial / Asignación Directa.",
+                            f"**Monto Emitido:** `{cantidad} {moneda.upper()}`",
                 color=discord.Color.blue()
             )
-            embed_log.set_footer(text="Registro Interno de la Tesorería Central")
             try:
                 await canal_logs.send(embed=embed_log)
             except discord.HTTPException as e:
-                print(f"⚠️ No se pudo enviar el log de emisión al canal de auditoría debido a un error de API: {e}")
-
-
-    # =========================================================================
-    # 🛡️ COMANDOS DE INCAUTACIÓN Y WIPE ECONÓMICO (BETA)
-    # =========================================================================
+                print(f"⚠️ Error de canal de logs: {e}")
 
     @commands.slash_command(name="banco_embargar", description="[SUPREME] Incauta todo el dinero de un usuario y lo devuelve a la Bóveda Central.")
     async def banco_embargar(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Usuario a embargar")):
@@ -273,9 +231,9 @@ class EconomiaCog(commands.Cog):
             await ctx.followup.send(f"⚠️ El usuario {usuario.name} ya tiene sus bolsillos vacíos.", ephemeral=True)
             return
 
-        await ctx.followup.send(f"⚖️ Se han incautado `{recuperado_pc:,} pc` de {usuario.name}. Los fondos retornaron a la Bóveda.", ephemeral=True)
+        await ctx.followup.send(f"⚖️ Se han incautado `{recuperado_pc:,} pc` de {usuario.name}.", ephemeral=True)
 
-        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
         if canal_logs:
             embed_log = discord.Embed(
                 title="⚖️ AUDITORÍA: EMBARGO FISCAL",
@@ -284,13 +242,12 @@ class EconomiaCog(commands.Cog):
                             f"**Ejecutor:** {ctx.user.mention}",
                 color=discord.Color.dark_red()
             )
-            embed_log.set_footer(text="Fondos inyectados de regreso a la Bóveda Central.")
             await canal_logs.send(embed=embed_log)
 
-    @commands.slash_command(name="banco_wipe_beta", description="[SUPREME] Vacía las cuentas de TODO EL SERVIDOR y retorna los fondos a la Bóveda.")
+    @commands.slash_command(name="banco_wipe_beta", description="[SUPREME] Vacía las cuentas de TODO EL SERVIDOR.")
     async def banco_wipe_beta(self, ctx: discord.ApplicationContext):
         if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
-            await ctx.respond("❌ **Acceso Denegado.** Comando altamente destructivo.", ephemeral=True)
+            await ctx.respond("❌ **Acceso Denegado.**", ephemeral=True)
             return
 
         await ctx.response.defer(ephemeral=False)
@@ -298,25 +255,17 @@ class EconomiaCog(commands.Cog):
 
         embed = discord.Embed(
             title="⚠️ RESETEO ECONÓMICO GLOBAL (WIPE)",
-            description="Por decreto de los Fundadores, se ha ejecutado un embargo global sobre todos los habitantes del reino.\n"
-                        "Las cuentas han vuelto a 0 y el oro circulante ha retornado a la Tesorería.",
+            description="Se ha ejecutado un embargo global sobre todos los habitantes del reino.",
             color=discord.Color.red()
         )
         embed.add_field(name="💰 Oro Total Recuperado", value=f"`{recuperado_total:,} pc`")
-        embed.set_footer(text=f"Orden Ejecutada por: {ctx.user.name}")
 
         await ctx.followup.send(embed=embed)
-
         canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
         if canal_logs:
             await canal_logs.send(embed=embed)
 
-
-    # =========================================================================
-    # ⚔ COMANDO COMERCIAL P2P / TIENDA: INTERCAMBIO LIBRE DE FONDOS
-    # =========================================================================
-
-    @commands.slash_command(name="pagar", description="Transfiere monedas de tu propio monedero hacia otro Aventurero o la Tienda.")
+    @commands.slash_command(name="pagar", description="Transfiere monedas hacia otro Aventurero o la Tienda.")
     async def pagar(
         self,
         ctx: discord.ApplicationContext,
@@ -329,39 +278,32 @@ class EconomiaCog(commands.Cog):
         ]),
         cantidad: discord.Option(int, "Cantidad de monedas a enviar", min_value=1)
     ):
-        # BLINDAJE P2P: Validar que los usuarios no puedan enviar monedas en negativo.
         if cantidad <= 0:
             await ctx.respond("❌ **Error Transaccional:** El monto debe ser superior a cero.", ephemeral=True)
             return
 
         if usuario.id == ctx.user.id:
-            await ctx.respond("❌ **Error Transaccional:** No puedes transferir fondos hacia tu propia cuenta corriente.", ephemeral=True)
+            await ctx.respond("❌ **Error Transaccional:** No puedes transferir fondos hacia tu propia cuenta.", ephemeral=True)
             return
 
         if usuario.bot and usuario.id != self.bot.user.id:
-            await ctx.respond("❌ **Error Operativo:** Las entidades automatizadas externas no aceptan transacciones comerciales.", ephemeral=True)
+            await ctx.respond("❌ **Error Operativo:** Bots externos no aceptan transacciones.", ephemeral=True)
             return
 
         await ctx.response.defer(ephemeral=True)
-        cobre_bruto = self._convertir_a_cobre(moneda, cantidad)
+        cobre_bruto = self._convertir_a_cobre(moneda, Rails := cantidad)
         receptor_id = 0 if usuario.id == self.bot.user.id else usuario.id
 
-        # Transferencia P2P atómica libre de condiciones de carrera
-        # NOTA EDUCATIVA: Atómico significa que toda la operación en base de datos pasa como un bloque sólido:
-        # o el dinero se mueve completo o falla y no pasa nada. Esto impide que se reste dinero pero no se sume,
-        # o que un jugador duplique monedas spameando el comando simultáneamente con bots externos.
         exito = await database.transferir_fondos(ctx.user.id, receptor_id, cobre_bruto)
-
         if not exito:
-            await ctx.followup.send(f"❌ **Fondos Insuficientes:** No posees la liquidez necesaria en tu monedero para cubrir esta transferencia de `{cantidad} {moneda}`.", ephemeral=True)
+            await ctx.followup.send(f"❌ **Fondos Insuficientes:** No posees la liquidez necesaria para transferir `{cantidad} {moneda}`.", ephemeral=True)
             return
 
         if receptor_id == 0:
-            await ctx.followup.send(f"💸 Has pagado `{cantidad} {moneda}` al Gremio (Fondos depositados en la Bóveda Central).", ephemeral=True)
+            await ctx.followup.send(f"💸 Has pagado `{cantidad} {moneda}` al Gremio.", ephemeral=True)
         else:
             await ctx.followup.send(f"💸 Has transferido `{cantidad} {moneda}` a la cuenta de {usuario.name}.", ephemeral=True)
 
-        # Envío silencioso al canal de Auditoría
         canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
         if canal_logs:
             nombre_receptor = "🏛️ BÓVEDA CENTRAL" if receptor_id == 0 else usuario.mention
@@ -370,13 +312,12 @@ class EconomiaCog(commands.Cog):
                 description=f"**Emisor:** {ctx.user.mention}\n"
                             f"**Receptor:** {nombre_receptor}\n"
                             f"**Monto Transferido:** `{cantidad} {moneda.upper()}`",
-                color=discord.Color.light_grey() if receptor_id != 0 else discord.Color.gold()
+                color=discord.Color.gold() if receptor_id == 0 else discord.Color.light_grey()
             )
-            embed_log.set_footer(text="Auditoría Automática de la Red Bancaria")
             try:
                 await canal_logs.send(embed=embed_log)
             except discord.HTTPException as e:
-                print(f"⚠️ Falló el log de transferencia P2P en el canal de auditoría debido a restricciones de Discord: {e}")
+                print(f"⚠️ Falló el log de transferencia: {e}")
 
 def setup(bot):
     bot.add_cog(EconomiaCog(bot))
