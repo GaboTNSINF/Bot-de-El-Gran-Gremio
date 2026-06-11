@@ -138,15 +138,26 @@ async def init_db():
         )
     """)
 
-    # Tabla de auditoría histórica independiente
-    await _connection.execute("""
+    # Tabla de auditoría histórica independiente e hijas relacionales
+    await _connection.executescript("""
         CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
-            folio INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            folio INTEGER NOT NULL,
             dm_id INTEGER NOT NULL,
             timestamp INTEGER NOT NULL,
             aventura TEXT NOT NULL,
-            recompensa_pc INTEGER NOT NULL
-        )
+            recompensa_pc INTEGER NOT NULL,
+            recompensa_objeto VARCHAR(50) DEFAULT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS auditoria_sesiones_jugadores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            auditoria_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            FOREIGN KEY (auditoria_id) REFERENCES auditoria_sesiones_fallidas(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_auditoria_sesiones_jugadores_auditoria ON auditoria_sesiones_jugadores(auditoria_id);
     """)
 
     # SCHEMA V3 CANÓNICO ASTERIA: Inyectamos las nuevas tablas de infraestructura Trustless

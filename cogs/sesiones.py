@@ -183,10 +183,17 @@ class ModalRecompensasGlobales(discord.ui.Modal):
                 timestamp = int(time.time())
                 async with database.db_lock:
                     await database._connection.execute("BEGIN")
-                    await database._connection.execute(
-                        "INSERT INTO auditoria_sesiones_fallidas (folio, dm_id, timestamp, aventura, recompensa_pc) VALUES (?, ?, ?, ?, ?)",
-                        (folio, interaction.user.id, timestamp, aventura, pc_totales)
-                    )
+                    async with database._connection.execute(
+                        "INSERT INTO auditoria_sesiones_fallidas (folio, dm_id, timestamp, aventura, recompensa_pc, recompensa_objeto) VALUES (?, ?, ?, ?, ?, ?)",
+                        (folio, interaction.user.id, timestamp, aventura, pc_totales, obj_norm)
+                    ) as cursor:
+                        auditoria_id = cursor.lastrowid
+
+                    for j in self.jugadores:
+                        await database._connection.execute(
+                            "INSERT INTO auditoria_sesiones_jugadores (auditoria_id, user_id) VALUES (?, ?)",
+                            (auditoria_id, int(j.id))
+                        )
                     await database._connection.commit()
             except Exception as e:
                 async with database.db_lock:
