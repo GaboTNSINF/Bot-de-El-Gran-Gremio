@@ -159,8 +159,8 @@ class EconomiaCog(commands.Cog):
             return
 
         # Ejecución Industrial en Base de Datos (1 sola transacción para N usuarios)
-        try:
-            async with database.db_lock:
+        async with database.db_lock:
+            try:
                 await database._connection.execute("BEGIN")
                 # 1. Comprobar liquidez de la Bóveda Central (0)
                 async with database._connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = 0") as cursor:
@@ -185,11 +185,10 @@ class EconomiaCog(commands.Cog):
                         (monto, u_id)
                     )
                 await database._connection.commit()
-        except Exception as e:
-            async with database.db_lock:
+            except Exception as e:
                 await database._connection.rollback()
-            await ctx.followup.send(f"❌ **Error Crítico de Dispersión:** {e}. Se ha ejecutado un Rollback manual.")
-            return
+                await ctx.followup.send(f"❌ **Error Crítico de Dispersión:** {e}. Se ha ejecutado un Rollback manual.")
+                return
 
         # Reporte final
 

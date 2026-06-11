@@ -118,8 +118,8 @@ class ModalRecompensasGlobales(discord.ui.Modal):
             obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
 
         # REFACTOR V5: Ejecución Atómica
-        try:
-            async with database.db_lock:
+        async with database.db_lock:
+            try:
                 await database._connection.execute("BEGIN")
                 for j in self.jugadores:
                     j_id = int(j.id)
@@ -148,11 +148,10 @@ class ModalRecompensasGlobales(discord.ui.Modal):
                         await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_id, obj_norm))
                         await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_id, obj_norm))
                 await database._connection.commit()
-        except Exception as e:
-            async with database.db_lock:
+            except Exception as e:
                 await database._connection.rollback()
-            await interaction.followup.send(f"❌ Error de base de datos durante la inyección atómica: {e}", ephemeral=True)
-            return
+                await interaction.followup.send(f"❌ Error de base de datos durante la inyección atómica: {e}", ephemeral=True)
+                return
 
         # Generar tarjeta de auditoría
         folio = random.randint(10000, 99999)
