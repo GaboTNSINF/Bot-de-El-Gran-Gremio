@@ -5,9 +5,6 @@ from discord.ext import commands
 import config
 import database
 
-# ID del canal privado donde el bot enviará los registros de auditoría
-CANAL_LOGS_ID = 1513250885730570442
-
 class EconomiaCog(commands.Cog):
     """Módulo maestro encargado de la lógica transaccional y el control bancario del Gremio."""
     def __init__(self, bot):
@@ -241,7 +238,8 @@ class EconomiaCog(commands.Cog):
         await ctx.followup.send(f"✅ Has emitido exitosamente `{cantidad} {moneda}` desde las arcas del Gremio hacia la cuenta de {usuario.name}.", ephemeral=True)
 
         # Envío silencioso al canal de Auditoría
-        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
+        canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
         if canal_logs:
             embed_log = discord.Embed(
                 title="📜 AUDITORÍA: EMISIÓN DE FONDOS",
@@ -309,7 +307,7 @@ class EconomiaCog(commands.Cog):
 
         await ctx.followup.send(embed=embed)
 
-        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
         if canal_logs:
             await canal_logs.send(embed=embed)
 
@@ -364,7 +362,7 @@ class EconomiaCog(commands.Cog):
             await ctx.followup.send(f"💸 Has transferido `{cantidad} {moneda}` a la cuenta de {usuario.name}.", ephemeral=True)
 
         # Envío silencioso al canal de Auditoría
-        canal_logs = ctx.guild.get_channel(CANAL_LOGS_ID)
+        canal_logs = ctx.guild.get_channel(config.CANAL_LOGS_ID)
         if canal_logs:
             nombre_receptor = "🏛️ BÓVEDA CENTRAL" if receptor_id == 0 else usuario.mention
             embed_log = discord.Embed(

@@ -241,6 +241,9 @@ async def init_db():
         version_db = (await cursor.fetchone())[0]
 
     if version_db < 1:
+        # Lazy Bridge puente de seguridad para inicialización de inventarios (Mitiga IntegrityError FK)
+        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) SELECT DISTINCT user_id FROM inventarios")
+
         # Lazy Bridge para foráneas
         await _connection.execute("""
             INSERT OR IGNORE INTO personajes_estados (user_id)
@@ -568,8 +571,8 @@ async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) 
         return False
 
     # REFACTOR V5: Transacciones explícitas para portabilidad segura en Schema V3
-    try:
-        async with db_lock:
+    async with db_lock:
+        try:
             await _connection.execute("BEGIN")
             # Lazy Init para ambos
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (emisor_id,))
@@ -594,16 +597,15 @@ async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) 
             )
             await _connection.commit()
             return True
-    except Exception:
-        async with db_lock:
+        except Exception:
             await _connection.rollback()
-        return False
+            return False
 
 async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
     """Extrae fondos directamente de la Bóveda del Gremio (id 0) bajo validación atómica estructural V3."""
     
-    try:
-        async with db_lock:
+    async with db_lock:
+        try:
             await _connection.execute("BEGIN")
             # Lazy init
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
@@ -623,10 +625,9 @@ async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
             await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_id))
             await _connection.commit()
             return True
-    except Exception:
-        async with db_lock:
+        except Exception:
             await _connection.rollback()
-        return False
+            return False
 
 # --- TIENDA E INVENTARIOS ---
 
@@ -669,8 +670,8 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: st
     Si no existe, lo crea.
     """
     item_id = producto_nombre.lower().replace(" ", "_")
-    try:
-        async with db_lock:
+    async with db_lock:
+        try:
             await _connection.execute("BEGIN")
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
 
@@ -688,10 +689,9 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: st
                 (user_id, item_id)
             )
             await _connection.commit()
-    except Exception as e:
-        async with db_lock:
+        except Exception as e:
             await _connection.rollback()
-        print(f"Error agregando item: {e}")
+            print(f"Error agregando item: {e}")
 
 async def obtener_inventario_usuario(user_id: int):
     # Reconstruimos la salida legacy uniendo ambas tablas V3
@@ -707,8 +707,8 @@ async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
     """
     item_id = producto_nombre.lower().replace(" ", "_")
 
-    try:
-        async with db_lock:
+    async with db_lock:
+        try:
             await _connection.execute("BEGIN")
             async with _connection.execute(
                 "UPDATE inventario_materiales SET cantidad = cantidad - 1 WHERE user_id = ? AND item_id = ? AND cantidad > 0",
@@ -721,10 +721,9 @@ async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
             await _connection.execute("DELETE FROM inventario_materiales WHERE user_id = ? AND cantidad <= 0", (user_id,))
             await _connection.commit()
             return True
-    except Exception:
-        async with db_lock:
+        except Exception:
             await _connection.rollback()
-        return False
+            return False
 
 # --- LÓGICA DE FICHA NIVEL20 ---
 
@@ -790,11 +789,8 @@ async def obtener_datos_ficha_completos(user_id: int):
 
 async def embargar_fondos(user_id: int) -> int:
     """Extrae la totalidad de los fondos de un usuario y los inyecta en la Bóveda Central (id 0) (V3)."""
-    try:
-        # Extraer el SELECT de validación fuera del Lock para respetar WAL si es posible,
-        # pero para consistencia transaccional incautatoria (que nadie gaste en el milisegundo),
-        # envolveremos la verificación de liquidez DENTRO de la transacción
-        async with db_lock:
+    async with db_lock:
+        try:
             await _connection.execute("BEGIN")
             async with _connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (user_id,)) as cursor:
                 row = await cursor.fetchone()
@@ -812,15 +808,14 @@ async def embargar_fondos(user_id: int) -> int:
             await _connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_recuperado,))
             await _connection.commit()
             return saldo_recuperado
-    except Exception:
-        async with db_lock:
+        except Exception:
             await _connection.rollback()
-        return 0
+            return 0
 
 async def embargo_masivo() -> int:
     """Wipe económico total V3: Transfiere todos los fondos de los jugadores a la Bóveda Central."""
-    try:
-        async with db_lock:
+    async with db_lock:
+        try:
             await _connection.execute("BEGIN")
             saldo_total_recuperado = 0
             async with _connection.execute("SELECT SUM(balance_pc) as total FROM economia_billetera WHERE user_id != 0") as cursor:
@@ -838,10 +833,9 @@ async def embargo_masivo() -> int:
 
             await _connection.commit()
             return saldo_total_recuperado
-    except Exception:
-        async with db_lock:
+        except Exception:
             await _connection.rollback()
-        return 0
+            return 0
 
 
 async def cerrar_db():
