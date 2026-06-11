@@ -296,24 +296,21 @@ async def init_db():
 
     await _connection.commit()
     
-    # REFACTORIZACIÓN TÉCNICA OBLIGATORIA EN init_db() DE database.py
+    # REFACTORIZACIÓN FINAL DE TESORERÍA EN init_db()
     try:
         await _connection.execute("BEGIN")
-        # Asegurar Lazy Bridge de ID 0 para foreign keys
-        await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES ('0')")
-
         # 1. Garantizar la existencia física de la Bóveda Central en la tabla canónica V3
         await _connection.execute(
             "INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES ('0', 20000000)"
         )
 
-        # 2. Si la base de datos es heredada y la billetera de la bóveda conserva un saldo inferior
-        # al buffer mínimo de seguridad, se reajusta automáticamente a 20,000,000 pc (20,000 pp).
+        # 2. Si la base de datos es heredada y posee un balance menor al buffer de seguridad,
+        # se reajusta automáticamente a 20,000,000 pc (20,000 pp) sin alterar el circulante.
         await _connection.execute(
             "UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = '0' AND balance_pc < 20000000"
         )
         await _connection.commit()
-        print("🏦 [TESORERÍA] Bóveda Central canonicalizada y estabilizada en 20,000,000 pc (20,000 pp) en economia_billetera.")
+        print("💰 [TESORERÍA] Bóveda Central canonicalizada y estabilizada en 20,000,000 pc (20,000 pp) en economia_billetera.")
     except Exception as e:
         await _connection.rollback()
         print(f"❌ Error Crítico al inicializar la Bóveda Central en economia_billetera: {e}")
