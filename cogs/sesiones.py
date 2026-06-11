@@ -9,13 +9,12 @@ import asyncio
 import re
 
 class VistaEncuestaDM(discord.ui.View):
-    """Botonera interactiva e inmune a reinicios que procesa las reseñas de satisfacción."""
+    """Botonera interactiva que procesa las reseñas de satisfacción."""
     def __init__(self):
         super().__init__(timeout=None)
 
     async def procesar_voto_por_contexto(self, interaction: discord.Interaction, valor: int, label_voto: str):
         try:
-            # Recuperar el ID del DM inyectado en el footer del Embed de manera defensiva
             if not interaction.message.embeds or not interaction.message.embeds[0].footer or not interaction.message.embeds[0].footer.text:
                 raise ValueError("Embed o footer faltante")
 
@@ -26,7 +25,7 @@ class VistaEncuestaDM(discord.ui.View):
 
             dm_id = int(match.group(1))
         except (IndexError, ValueError, AttributeError):
-            await interaction.response.send_message("❌ **Error de Integridad:** Los metadatos de esta encuesta están corruptos o el embed fue alterado.", ephemeral=True)
+            await interaction.response.send_message("❌ **Error de Integridad:** Los metadatos de esta encuesta están corruptos.", ephemeral=True)
             return
 
         dm_usuario = interaction.client.get_user(dm_id) or await interaction.client.fetch_user(dm_id)
@@ -59,7 +58,6 @@ class VistaEncuestaDM(discord.ui.View):
 async def enviar_encuesta_individual(miembro, dm, aventura):
     vista_personalizada = VistaEncuestaDM()
 
-    # Construir Embed que persistirá el metadata DM-ID
     embed = discord.Embed(
         title="Evaluación de Sesión",
         description=f"👋 Saludos Aventurero. El **DM {dm.name}** acaba de registrar la sesión **'{aventura}'** en el Gremio.\n"
@@ -73,16 +71,11 @@ async def enviar_encuesta_individual(miembro, dm, aventura):
     except discord.Forbidden:
         pass
 
-
-# =========================================================================
-# REFACTOR V5: Flujo Multi-Paso Estricto UI V2 (Erradicación Texto Libre)
-# =========================================================================
-
 class ModalRecompensasGlobales(discord.ui.Modal):
     def __init__(self, jugadores, salvaciones):
         super().__init__(title="Recompensas y Variables Globales")
-        self.jugadores = jugadores # Lista de discord.Member
-        self.salvaciones = salvaciones # Dict: {member_id: bool_exito}
+        self.jugadores = jugadores
+        self.salvaciones = salvaciones
 
         self.add_item(discord.ui.InputText(label="Aventura / Crónica Breve", placeholder="El asalto a la fortaleza...", required=True))
         self.add_item(discord.ui.InputText(label="PC Totales a repartir por jugador", placeholder="Ej: 50000", required=True))
@@ -112,25 +105,20 @@ class ModalRecompensasGlobales(discord.ui.Modal):
             await interaction.followup.send("❌ El ID del Anillo Geográfico debe ser un número entero válido.", ephemeral=True)
             return
 
-        # Limpiar ID del objeto recompensa (normalizar) antes de abrir transacción para evitar TOCTOU/retenciones largas
         obj_norm = None
         if objeto_id:
             obj_norm = re.sub(r'[\s]+', '_', objeto_id).lower()
 
-        # REFACTOR V5: Ejecución Atómica
+        # Inyección Atómica Principal
         async with database.db_lock:
             try:
                 await database._connection.execute("BEGIN")
                 for j in self.jugadores:
                     j_id = int(j.id)
-                    # Lazy init
                     await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (j_id,))
 
-                    # Calcular extenuación: Si falló la salvación de Const, sumar 1
                     extenuacion_mod = 0 if self.salvaciones.get(j.id, True) else 1
 
-                    # Actualizar estado de viaje y extenuación (y anillo_id)
-                    # NOTA EDUCATIVA: Simulamos un viaje temporalmente bloqueando el estado_viajando
                     await database._connection.execute("""
                         UPDATE personajes_estados
                         SET estado_viajando = 1,
@@ -139,11 +127,9 @@ class ModalRecompensasGlobales(discord.ui.Modal):
                         WHERE user_id = ?
                     """, (extenuacion_mod, anillo_id, j_id))
 
-                    # Inyectar PC a la billetera (Transacción Bifurcada Retrocompatible V6)
                     await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (j_id,))
                     await database._connection.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (pc_totales, j_id))
 
-                    # Opcional: Inyectar ítem si se dio ID (ya normalizado arriba)
                     if obj_norm:
                         await database._connection.execute("INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)", (j_id, obj_norm))
                         await database._connection.execute("UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?", (j_id, obj_norm))
@@ -156,7 +142,6 @@ class ModalRecompensasGlobales(discord.ui.Modal):
         # Generar tarjeta de auditoría
         folio = random.randint(10000, 99999)
         canal_auditoria = interaction.guild.get_channel(config.CANAL_DISCUSION_SESIONES)
-
         menciones_texto = [j.mention for j in self.jugadores]
 
         embed_auditoria = discord.Embed(title=f"🗃️ AUDITORÍA DE SESIÓN • FOLIO #{folio}", color=discord.Color.gold())
@@ -175,12 +160,12 @@ class ModalRecompensasGlobales(discord.ui.Modal):
             except discord.HTTPException as e:
                 print(f"⚠️ Error de red al enviar auditoría: {e}")
 
-        # Si el envío falla, insertamos el folio en la tabla histórica dedicada para auditoría manual
+        # FLUJO DE CONTINGENCIA BLINDADO (Lock encapsulando try...except y mapeo relacional Padre-Hijo completo)
         if not auditoria_exitosa:
-            try:
-                import time
-                timestamp = int(time.time())
-                async with database.db_lock:
+            import time
+            timestamp = int(time.time())
+            async with database.db_lock:
+                try:
                     await database._connection.execute("BEGIN")
                     async with database._connection.execute(
                         "INSERT INTO auditoria_sesiones_fallidas (folio, dm_id, timestamp, aventura, recompensa_pc, recompensa_objeto) VALUES (?, ?, ?, ?, ?, ?)",
@@ -194,12 +179,10 @@ class ModalRecompensasGlobales(discord.ui.Modal):
                             (auditoria_id, int(j.id))
                         )
                     await database._connection.commit()
-            except Exception as e:
-                async with database.db_lock:
+                except Exception as e:
                     await database._connection.rollback()
-                print(f"⚠️ Error fatal al guardar la auditoría histórica del folio #{folio}: {e}")
+                    print(f"⚠️ Error fatal al guardar la auditoría histórica del folio #{folio}: {e}")
 
-        # Disparar encuestas
         tareas = [enviar_encuesta_individual(j, interaction.user, aventura) for j in self.jugadores if not j.bot]
         await asyncio.gather(*tareas, return_exceptions=True)
 
@@ -216,14 +199,12 @@ class ModalRecompensasGlobales(discord.ui.Modal):
             except:
                 pass
 
-
 class VistaSalvaciones(discord.ui.View):
     def __init__(self, jugadores):
-        super().__init__(timeout=900) # 15 min
+        super().__init__(timeout=900)
         self.jugadores = jugadores
-        self.salvaciones = {j.id: True for j in jugadores} # Por defecto todos pasan
+        self.salvaciones = {j.id: True for j in jugadores}
 
-        # Crear un select dinamico
         opciones = [discord.SelectOption(label=j.display_name, value=str(j.id)) for j in jugadores]
         self.select = discord.ui.Select(placeholder="¿Quiénes fallaron la tirada de Constitución?", min_values=0, max_values=len(opciones), options=opciones)
         self.select.callback = self.select_callback
@@ -235,21 +216,16 @@ class VistaSalvaciones(discord.ui.View):
 
     async def select_callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        # Resetear
         self.salvaciones = {j.id: True for j in self.jugadores}
-        # Marcar los seleccionados como fallos (False)
         for val in self.select.values:
             self.salvaciones[int(val)] = False
 
     async def confirmar_callback(self, interaction: discord.Interaction):
-        # Desplegamos el Modal final (Paso 3)
         await interaction.response.send_modal(ModalRecompensasGlobales(self.jugadores, self.salvaciones))
-
 
 class VistaSeleccionJugadores(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=900)
-
         self.user_select = discord.ui.UserSelect(placeholder="Selecciona a los jugadores de tu mesa (Max 8)", min_values=1, max_values=8)
         self.user_select.callback = self.user_select_callback
         self.add_item(self.user_select)
@@ -259,10 +235,7 @@ class VistaSeleccionJugadores(discord.ui.View):
         if not jugadores:
             await interaction.response.send_message("❌ Debes seleccionar al menos un jugador.", ephemeral=True)
             return
-
-        # Pasar al Paso 2: Menú de Salvaciones
-        await interaction.response.edit_message(content="**Paso 2:** Selecciona a los jugadores que *FALLARON* su salvación de Constitución por el viaje/extenuación. Los que no selecciones, se asumirá que tuvieron Éxito.", view=VistaSalvaciones(jugadores))
-
+        await interaction.response.edit_message(content="**Paso 2:** Selecciona a los jugadores que *FALLARON* su salvación de Constitución por el viaje/extenuación.", view=VistaSalvaciones(jugadores))
 
 class SesionesCog(commands.Cog):
     def __init__(self, bot):
@@ -277,8 +250,6 @@ class SesionesCog(commands.Cog):
         if not any(rol.id == config.ROL_DUNGEON_MASTER for rol in ctx.user.roles):
             await ctx.respond("❌ Solo los miembros con el rol oficial de Dungeon Master pueden firmar actas de sesión.", ephemeral=True)
             return
-
-        # Paso 1: Vista Efímera con UserSelect
         await ctx.respond("**Paso 1:** Selecciona los miembros de Discord que participaron en la sesión.", view=VistaSeleccionJugadores(), ephemeral=True)
 
     @commands.slash_command(name="auditar_dm", description="[STAFF] Extrae el análisis estadístico del Score Neto de un Dungeon Master.")
@@ -288,9 +259,8 @@ class SesionesCog(commands.Cog):
             return
 
         dm_perfil = await database.obtener_perfil_dm(dm_usuario.id)
-
         if not dm_perfil or dm_perfil["partidas"] == 0:
-            await ctx.respond(f"ℹ️ El usuario {dm_usuario.mention} no registra actividad de narración activa en la base de datos.", ephemeral=True)
+            await ctx.respond(f"ℹ️ El usuario {dm_usuario.mention} no registra actividad de narración activa.", ephemeral=True)
             return
 
         embed = discord.Embed(title=f"📊 CUADRO DE MANDO ANALÍTICO: {dm_usuario.name}", color=discord.Color.dark_teal())
@@ -300,9 +270,9 @@ class SesionesCog(commands.Cog):
         embed.add_field(name="📈 Índice de Aprobación", value=f"**{dm_perfil['aprobacion']:.1f}%**", inline=True)
 
         if dm_perfil["aprobacion"] >= 75.0:
-            embed.description = "💡 **Dictamen del Sistema:** Salud de mesa óptima. El DM cuenta con aprobación mayoritaria del gremio."
+            embed.description = "💡 **Dictamen del Sistema:** Salud de mesa óptima. El DM cuenta con aprobación mayoritaria."
         else:
-            embed.description = "⚠️ **Dictamen del Sistema:** Alerta de calidad. El índice de aprobación se encuentra por debajo del estándar sugerido."
+            embed.description = "⚠️ **Dictamen del Sistema:** Alerta de calidad. El índice de aprobación está por debajo del estándar."
 
         await ctx.respond(embed=embed)
 
