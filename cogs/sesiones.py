@@ -131,11 +131,13 @@ class ModalRecompensasGlobales(discord.ui.Modal):
 
                     # Actualizar estado de viaje y extenuación (y anillo_id)
                     # NOTA EDUCATIVA: Simulamos un viaje temporalmente bloqueando el estado_viajando
+                    # Marcamos 'pendiente_auditoria' a 1 como protocolo defensivo de Doble Escritura
                     await database._connection.execute("""
                         UPDATE personajes_estados
                         SET estado_viajando = 1,
                             nivel_extenuacion = nivel_extenuacion + ?,
-                            anillo_geografico_id = ?
+                            anillo_geografico_id = ?,
+                            pendiente_auditoria = 1
                         WHERE user_id = ?
                     """, (extenuacion_mod, anillo_id, j_id))
 
@@ -168,14 +170,35 @@ class ModalRecompensasGlobales(discord.ui.Modal):
         embed_auditoria.add_field(name="💰 PC Otorgados", value=f"{pc_totales} a c/u", inline=True)
         embed_auditoria.add_field(name="🛡️ Fallaron Salvación", value=str(sum(1 for v in self.salvaciones.values() if not v)), inline=True)
 
+        auditoria_exitosa = False
         if canal_auditoria:
-            await canal_auditoria.send(embed=embed_auditoria)
+            try:
+                await canal_auditoria.send(embed=embed_auditoria)
+                auditoria_exitosa = True
+            except discord.HTTPException as e:
+                print(f"⚠️ Error de red al enviar auditoría: {e}")
+
+        # Si el envío fue exitoso, limpiamos la bandera de pendiente_auditoria
+        if auditoria_exitosa:
+            try:
+                async with database.db_lock:
+                    await database._connection.execute("BEGIN")
+                    for j in self.jugadores:
+                        await database._connection.execute("UPDATE personajes_estados SET pendiente_auditoria = 0 WHERE user_id = ?", (int(j.id),))
+                    await database._connection.commit()
+            except Exception as e:
+                async with database.db_lock:
+                    await database._connection.rollback()
+                print(f"⚠️ Error al limpiar pendiente_auditoria: {e}")
 
         # Disparar encuestas
         tareas = [enviar_encuesta_individual(j, interaction.user, aventura) for j in self.jugadores if not j.bot]
         await asyncio.gather(*tareas, return_exceptions=True)
 
-        mensaje_exito = f"✅ **Reporte Exitoso (Folio #{folio}):** Datos inyectados atómicamente en la DB."
+        if auditoria_exitosa:
+            mensaje_exito = f"✅ **Reporte Exitoso (Folio #{folio}):** Datos inyectados atómicamente en la DB."
+        else:
+            mensaje_exito = f"⚠️ Recompensas inyectadas, pero falló la conexión con el canal de auditoría. Por favor, proporciona el **Folio #{folio}** a la administración."
 
         if not interaccion_expirada:
             await interaction.followup.send(mensaje_exito, ephemeral=True)
