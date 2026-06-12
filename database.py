@@ -357,6 +357,8 @@ async def eliminar_personaje(user_id: int) -> bool:
     try:
         async with get_db() as db:
 
+            async with transaccion_gremial(db):
+
                 async with db.execute("DELETE FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
                     if cursor.rowcount == 0:
                         raise TransactionLogicError()
@@ -368,15 +370,18 @@ async def eliminar_personaje(user_id: int) -> bool:
 
 async def guardar_registro_matchmaking(user_id: int, rol: str, tier: str, dias: str, inicio: int, fin: int):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("""
-                INSERT OR REPLACE INTO matchmaking (user_id, rol_busqueda, tier_juego, dias_disponibles, hora_inicio_utc, hora_fin_utc)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, rol, tier, dias, inicio, fin))
+                await db.execute("""
+                    INSERT OR REPLACE INTO matchmaking (user_id, rol_busqueda, tier_juego, dias_disponibles, hora_inicio_utc, hora_fin_utc)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (user_id, rol, tier, dias, inicio, fin))
 
 async def eliminar_de_cola(user_id: int) -> bool:
     try:
         async with get_db() as db:
+
+            async with transaccion_gremial(db):
 
                 async with db.execute("DELETE FROM matchmaking WHERE user_id = ?", (user_id,)) as cursor:
                     if cursor.rowcount == 0:
@@ -396,6 +401,8 @@ async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int) -> bool:
     try:
         async with get_db() as db:
 
+            async with transaccion_gremial(db):
+
                 async with db.execute("UPDATE aventureros SET nivel = ? WHERE user_id = ?", (nuevo_nivel, user_id)) as cursor:
                     if cursor.rowcount == 0:
                         raise TransactionLogicError()
@@ -408,6 +415,8 @@ async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int) -> bool:
 async def editar_datos_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str) -> bool:
     try:
         async with get_db() as db:
+
+            async with transaccion_gremial(db):
 
                 async with db.execute("""
                     UPDATE aventureros
@@ -487,8 +496,9 @@ async def obtener_ladder_dms():
 
 async def registrar_ancla_nomina(seccion: str, channel_id: int, message_id: int):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("INSERT OR REPLACE INTO control_nominas (seccion, channel_id, message_id) VALUES (?, ?, ?)", (seccion, channel_id, message_id))
+                await db.execute("INSERT OR REPLACE INTO control_nominas (seccion, channel_id, message_id) VALUES (?, ?, ?)", (seccion, channel_id, message_id))
 
 async def obtener_ancla_nomina(seccion: str):
     async with get_db() as db:
@@ -497,13 +507,15 @@ async def obtener_ancla_nomina(seccion: str):
 
 async def actualizar_miembro_personal(user_id: int, division: str, rango: str):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("INSERT OR REPLACE INTO personal_ramas (user_id, division, rango_interno) VALUES (?, ?, ?)", (user_id, division, rango))
+                await db.execute("INSERT OR REPLACE INTO personal_ramas (user_id, division, rango_interno) VALUES (?, ?, ?)", (user_id, division, rango))
 
 async def remover_miembro_personal(user_id: int):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("DELETE FROM personal_ramas WHERE user_id = ?", (user_id,))
+                await db.execute("DELETE FROM personal_ramas WHERE user_id = ?", (user_id,))
 
 async def obtener_personal_division(division: str):
     async with get_db() as db:
@@ -550,15 +562,18 @@ async def obtener_balance(id_entidad: int) -> int:
 
 async def inyectar_fondos_ignorados(dm_id: int, nombre_dm: str, valor: int, label_voto: str):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("INSERT OR IGNORE INTO registro_dms (dm_id, nombre_dm) VALUES (?, ?)", (dm_id, nombre_dm))
-            await db.execute("INSERT INTO reseñas_dms (dm_id, valoracion, comentario) VALUES (?, ?, ?)", (dm_id, valor, f"Voto directo: {label_voto}"))
+                await db.execute("INSERT OR IGNORE INTO registro_dms (dm_id, nombre_dm) VALUES (?, ?)", (dm_id, nombre_dm))
+                await db.execute("INSERT INTO reseñas_dms (dm_id, valoracion, comentario) VALUES (?, ?, ?)", (dm_id, valor, f"Voto directo: {label_voto}"))
 
 async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) -> bool:
     if cantidad_pc <= 0:
         return False
     try:
         async with get_db() as db:
+
+            async with transaccion_gremial(db):
 
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (emisor_id,))
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
@@ -582,6 +597,8 @@ async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) 
 async def procesar_nominas_masivas(pagos_pendientes: dict, total_gasto_pc: int) -> bool:
     try:
         async with get_db() as db:
+
+            async with transaccion_gremial(db):
 
                 async with db.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = 0") as cursor:
                     boveda = await cursor.fetchone()
@@ -612,6 +629,8 @@ async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
     try:
         async with get_db() as db:
 
+            async with transaccion_gremial(db):
+
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
                 await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
@@ -635,6 +654,8 @@ async def procesar_compra_gremial(user_id: int, producto_nombre: str, costo_pc: 
     item_id = producto_nombre.lower().replace(" ", "_")
     try:
         async with get_db() as db:
+
+            async with transaccion_gremial(db):
 
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
@@ -671,8 +692,9 @@ async def procesar_compra_gremial(user_id: int, producto_nombre: str, costo_pc: 
 
 async def registrar_ticket(channel_id: int, user_id: int):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("INSERT OR REPLACE INTO registro_tickets (channel_id, user_id, estado) VALUES (?, ?, 'ABIERTO')", (channel_id, user_id))
+                await db.execute("INSERT OR REPLACE INTO registro_tickets (channel_id, user_id, estado) VALUES (?, ?, 'ABIERTO')", (channel_id, user_id))
 
 async def obtener_creador_ticket(channel_id: int):
     async with get_db() as db:
@@ -682,8 +704,9 @@ async def obtener_creador_ticket(channel_id: int):
 
 async def cerrar_ticket_db(channel_id: int):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("UPDATE registro_tickets SET estado = 'CERRADO' WHERE channel_id = ?", (channel_id,))
+                await db.execute("UPDATE registro_tickets SET estado = 'CERRADO' WHERE channel_id = ?", (channel_id,))
 
 # --- TIENDA E INVENTARIOS ---
 
@@ -694,15 +717,18 @@ async def obtener_catalogo():
 
 async def agregar_producto_db(nombre: str, precio_str: str, costo_pc: int, categoria: str, descripcion: str):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("""
-                INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
-                VALUES (?, ?, ?, ?, ?)
-            """, (nombre, precio_str, costo_pc, categoria, descripcion))
+                await db.execute("""
+                    INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (nombre, precio_str, costo_pc, categoria, descripcion))
 
 async def eliminar_producto_db(nombre: str) -> bool:
     try:
         async with get_db() as db:
+
+            async with transaccion_gremial(db):
 
                 async with db.execute("DELETE FROM tienda_productos WHERE nombre = ? COLLATE NOCASE", (nombre,)) as cursor:
                     if cursor.rowcount == 0:
@@ -715,23 +741,26 @@ async def eliminar_producto_db(nombre: str) -> bool:
 
 async def migrar_catalogo_inicial(catalogo_base: dict):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            async with db.execute("SELECT COUNT(*) as cuenta FROM tienda_productos") as cursor:
-                row = await cursor.fetchone()
-                if row and row["cuenta"] > 0:
-                    return
+                async with db.execute("SELECT COUNT(*) as cuenta FROM tienda_productos") as cursor:
+                    row = await cursor.fetchone()
+                    if row and row["cuenta"] > 0:
+                        return
 
-            for categoria, items in catalogo_base.items():
-                for item in items:
-                    await db.execute("""
-                        INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
+                for categoria, items in catalogo_base.items():
+                    for item in items:
+                        await db.execute("""
+                            INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
 
 async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: str = 'tienda'):
     item_id = producto_nombre.lower().replace(" ", "_")
     try:
         async with get_db() as db:
+
+            async with transaccion_gremial(db):
 
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
 
@@ -762,6 +791,8 @@ async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
     try:
         async with get_db() as db:
 
+            async with transaccion_gremial(db):
+
                 async with db.execute(
                     "UPDATE inventario_materiales SET cantidad = cantidad - 1 WHERE user_id = ? AND item_id = ? AND cantidad > 0",
                     (user_id, item_id)
@@ -780,28 +811,29 @@ async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
 
 async def guardar_datos_ficha_nivel20(user_id: int, stats: dict):
     async with get_db() as db:
+        async with transaccion_gremial(db):
 
-            await db.execute("DELETE FROM ficha_estadisticas WHERE user_id = ?", (user_id,))
-            await db.execute("""
-                INSERT INTO ficha_estadisticas (user_id, fuerza, destreza, constitucion, inteligencia, sabiduria, carisma, iniciativa, velocidad, competencia)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                user_id, stats.get('fuerza', 10), stats.get('destreza', 10), stats.get('constitucion', 10),
-                stats.get('inteligencia', 10), stats.get('sabiduria', 10), stats.get('carisma', 10),
-                stats.get('iniciativa', '+0'), stats.get('velocidad', '30 pies'), stats.get('competencia', '+2')
-            ))
+                await db.execute("DELETE FROM ficha_estadisticas WHERE user_id = ?", (user_id,))
+                await db.execute("""
+                    INSERT INTO ficha_estadisticas (user_id, fuerza, destreza, constitucion, inteligencia, sabiduria, carisma, iniciativa, velocidad, competencia)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id, stats.get('fuerza', 10), stats.get('destreza', 10), stats.get('constitucion', 10),
+                    stats.get('inteligencia', 10), stats.get('sabiduria', 10), stats.get('carisma', 10),
+                    stats.get('iniciativa', '+0'), stats.get('velocidad', '30 pies'), stats.get('competencia', '+2')
+                ))
 
-            await db.execute("DELETE FROM ficha_clases WHERE user_id = ?", (user_id,))
-            for c in stats.get('clases', []):
-                await db.execute("INSERT INTO ficha_clases (user_id, clase, nivel) VALUES (?, ?, ?)", (user_id, c['nombre'], c['nivel']))
+                await db.execute("DELETE FROM ficha_clases WHERE user_id = ?", (user_id,))
+                for c in stats.get('clases', []):
+                    await db.execute("INSERT INTO ficha_clases (user_id, clase, nivel) VALUES (?, ?, ?)", (user_id, c['nombre'], c['nivel']))
 
-            await db.execute("DELETE FROM ficha_rasgos WHERE user_id = ?", (user_id,))
-            for r in stats.get('rasgos', []):
-                await db.execute("INSERT INTO ficha_rasgos (user_id, nombre) VALUES (?, ?)", (user_id, r))
+                await db.execute("DELETE FROM ficha_rasgos WHERE user_id = ?", (user_id,))
+                for r in stats.get('rasgos', []):
+                    await db.execute("INSERT INTO ficha_rasgos (user_id, nombre) VALUES (?, ?)", (user_id, r))
 
-            await db.execute("DELETE FROM ficha_conjuros WHERE user_id = ?", (user_id,))
-            for conjuro in stats.get('conjuros', []):
-                await db.execute("INSERT INTO ficha_conjuros (user_id, nombre, nivel) VALUES (?, ?, ?)", (user_id, conjuro['nombre'], conjuro['nivel']))
+                await db.execute("DELETE FROM ficha_conjuros WHERE user_id = ?", (user_id,))
+                for conjuro in stats.get('conjuros', []):
+                    await db.execute("INSERT INTO ficha_conjuros (user_id, nombre, nivel) VALUES (?, ?, ?)", (user_id, conjuro['nombre'], conjuro['nivel']))
 
 async def obtener_datos_ficha_completos(user_id: int):
     datos = {}
@@ -829,6 +861,8 @@ async def embargar_fondos(user_id: int) -> int:
     try:
         async with get_db() as db:
 
+            async with transaccion_gremial(db):
+
                 async with db.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (user_id,)) as cursor:
                     row = await cursor.fetchone()
                     if not row or row["balance_pc"] <= 0:
@@ -848,6 +882,8 @@ async def embargar_fondos(user_id: int) -> int:
 async def embargo_masivo() -> int:
     try:
         async with get_db() as db:
+
+            async with transaccion_gremial(db):
 
                 saldo_total_recuperado = 0
                 async with db.execute("SELECT SUM(balance_pc) as total FROM economia_billetera WHERE user_id != 0") as cursor:

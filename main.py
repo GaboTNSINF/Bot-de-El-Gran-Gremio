@@ -123,7 +123,6 @@ async def ejecutar_bot():
         if not bot.is_closed():
             await bot.close()
 
-        await cerrar_db()
         print("👋 [APAGADO] Proceso finalizado de forma limpia. Bóveda resguardada.\n")
 
 
