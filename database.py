@@ -2,334 +2,338 @@ import aiosqlite
 import os
 import contextlib
 
-@contextlib.asynccontextmanager
-async def transaction(db):
-    try:
-        await db.execute("BEGIN TRANSACTION;")
-        yield
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-
-
-# Determinar la ruta absoluta del directorio donde reside este archivo de forma dinámica
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "gremio.db")
 
+class TransactionLogicError(Exception):
+    pass
+
 @contextlib.asynccontextmanager
 async def get_db():
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, isolation_level=None) as db:
         await db.execute("PRAGMA foreign_keys = ON;")
         await db.execute("PRAGMA journal_mode = WAL;")
         await db.execute("PRAGMA busy_timeout = 5000;")
         db.row_factory = aiosqlite.Row
         yield db
 
+@contextlib.asynccontextmanager
+async def transaccion_gremial(db: aiosqlite.Connection):
+    await db.execute("BEGIN TRANSACTION;")
+    try:
+        yield
+        await db.execute("COMMIT;")
+    except Exception:
+        try:
+            await db.execute("ROLLBACK;")
+        except Exception as rollback_error:
+            import logging
+            logging.critical(f"⚠️ Fallo crítico al ejecutar ROLLBACK en disco: {rollback_error}")
+        raise
+
 async def init_db():
-    """Inicializa el esquema de la base de datos."""
     async with get_db() as db:
-        async with transaction(db):
-            # 1. Tabla de Aventureros
+
+        # 1. Tabla de Aventureros
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS aventureros (
+                user_id INTEGER PRIMARY KEY,
+                char_name TEXT NOT NULL,
+                char_race TEXT NOT NULL,
+                char_class TEXT NOT NULL,
+                char_age INTEGER NOT NULL,
+                char_height TEXT NOT NULL,
+                sheet_link TEXT NOT NULL,
+                nivel INTEGER DEFAULT 1,
+                sesiones_jugadas INTEGER DEFAULT 0
+            )
+        """)
+
+        # Motor de migración interna de aventureros
+        async with db.execute("PRAGMA table_info(aventureros)") as cursor:
+            columnas_existentes = [columna["name"] for columna in await cursor.fetchall()]
+
+        if "nivel" not in columnas_existentes:
+            await db.execute("ALTER TABLE aventureros ADD COLUMN nivel INTEGER DEFAULT 1")
+        if "sesiones_jugadas" not in columnas_existentes:
+            await db.execute("ALTER TABLE aventureros ADD COLUMN sesiones_jugadas INTEGER DEFAULT 0")
+
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_aventureros_ladder ON aventureros (nivel DESC, sesiones_jugadas DESC)")
+
+        # 2. Sistema de Matchmaking
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS matchmaking (
+                user_id INTEGER PRIMARY KEY,
+                rol_busqueda TEXT NOT NULL,
+                tier_juego TEXT,
+                dias_disponibles TEXT NOT NULL,
+                hora_inicio_utc INTEGER NOT NULL,
+                hora_fin_utc INTEGER NOT NULL
+            )
+        """)
+
+        # 3. Registro de Dungeon Masters
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS registro_dms (
+                dm_id INTEGER PRIMARY KEY,
+                nombre_dm TEXT NOT NULL,
+                rango_licencia TEXT DEFAULT 'Aprendiz',
+                partidas_narradas INTEGER DEFAULT 0
+            )
+        """)
+
+        # 4. Urna Transaccional Anónima (Reseñas)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reseñas_dms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dm_id INTEGER NOT NULL,
+                valoracion INTEGER NOT NULL,
+                comentario TEXT,
+                FOREIGN KEY (dm_id) REFERENCES registro_dms(dm_id)
+            )
+        """)
+
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_resenas_dm_id ON reseñas_dms (dm_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_dms_partidas ON registro_dms (partidas_narradas DESC)")
+
+        # 5. Control de Anclas de Embeds
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS control_nominas (
+                seccion TEXT PRIMARY KEY,
+                channel_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL
+            )
+        """)
+
+        # 6. Personal Administrativo
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS personal_ramas (
+                user_id INTEGER PRIMARY KEY,
+                division TEXT NOT NULL,
+                rango_interno TEXT NOT NULL
+            )
+        """)
+
+        # 7. Balances Legacy
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS cuentas_bancarias (
+                id_entidad INTEGER PRIMARY KEY,
+                balance_pc INTEGER DEFAULT 0
+            )
+        """)
+
+        # 8. Catálogo de Tienda
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tienda_productos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT NOT NULL COLLATE NOCASE,
+                precio_str TEXT NOT NULL,
+                costo_pc INTEGER NOT NULL,
+                categoria TEXT NOT NULL,
+                descripcion TEXT NOT NULL
+            )
+        """)
+
+        # 9. Infraestructura del Histórico Relacional Padre-Hijo (Anti-Colisiones Estocásticas)
+        await db.executescript("""
+            CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                folio INTEGER NOT NULL,
+                dm_id INTEGER NOT NULL,
+                timestamp INTEGER NOT NULL,
+                aventura TEXT NOT NULL,
+                recompensa_pc INTEGER NOT NULL,
+                recompensa_objeto VARCHAR(50) DEFAULT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS auditoria_sesiones_jugadores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                auditoria_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                FOREIGN KEY (auditoria_id) REFERENCES auditoria_sesiones_fallidas(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_auditoria_sesiones_jugadores_auditoria ON auditoria_sesiones_jugadores(auditoria_id);
+        """)
+
+        # SCHEMA V3 CANÓNICO ASTERIA: Infraestructura Trustless Normalizada
+        await db.executescript("""
+            CREATE TABLE IF NOT EXISTS matriz_recompensas (
+                rango_dm VARCHAR(20) NOT NULL,
+                nivel_personaje INTEGER NOT NULL,
+                max_pc_permitido INTEGER NOT NULL,
+                max_rareza VARCHAR(20) NOT NULL,
+                PRIMARY KEY (rango_dm, nivel_personaje)
+            );
+
+            CREATE TABLE IF NOT EXISTS personajes_estados (
+                user_id INTEGER PRIMARY KEY,
+                estado_viajando BOOLEAN DEFAULT 0,
+                viaje_desbloqueo_timestamp INTEGER DEFAULT 0,
+                nivel_extenuacion INTEGER DEFAULT 0,
+                estado_herido BOOLEAN DEFAULT 0,
+                pendiente_auditoria BOOLEAN DEFAULT 0,
+                anillo_geografico_id INTEGER DEFAULT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS economia_billetera (
+                user_id INTEGER PRIMARY KEY,
+                balance_pc INTEGER DEFAULT 0 CHECK(balance_pc >= 0),
+                FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS inventario_materiales (
+                user_id INTEGER NOT NULL,
+                item_id VARCHAR(50) NOT NULL,
+                cantidad INTEGER NOT NULL CHECK(cantidad >= 0),
+                PRIMARY KEY (user_id, item_id),
+                FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS inventario_instancias (
+                instance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                item_id VARCHAR(50) NOT NULL,
+                durabilidad_actual INTEGER NOT NULL CHECK(durabilidad_actual >= 0),
+                grado_runa INTEGER DEFAULT 0,
+                estado_critico BOOLEAN DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS registro_recetas_conocidas (
+                user_id INTEGER NOT NULL,
+                receta_id VARCHAR(50) NOT NULL,
+                PRIMARY KEY (user_id, receta_id),
+                FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS registro_tickets (
+                channel_id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                estado VARCHAR(20) DEFAULT 'ABIERTO'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_inventario_materiales_user ON inventario_materiales(user_id);
+            CREATE INDEX IF NOT EXISTS idx_inventario_instancias_user ON inventario_instancias(user_id);
+            CREATE INDEX IF NOT EXISTS idx_registro_recetas_user ON registro_recetas_conocidas(user_id);
+        """)
+
+        # Inventarios Legacy
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS inventarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                producto_nombre TEXT NOT NULL,
+                cantidad INTEGER DEFAULT 1,
+                origen TEXT DEFAULT 'tienda',
+                FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+            )
+        """)
+
+        # Puente de Retrocompatibilidad de Esquema
+        async with db.execute("PRAGMA table_info(personajes_estados)") as cursor:
+            columnas_estados = [columna["name"] for columna in await cursor.fetchall()]
+
+        if "anillo_geografico_id" not in columnas_estados:
+            await db.execute("ALTER TABLE personajes_estados ADD COLUMN anillo_geografico_id INTEGER DEFAULT NULL")
+
+        # Rutinas de Migración y Porteo Atómico Histórico
+        async with db.execute("PRAGMA user_version") as cursor:
+            version_db = (await cursor.fetchone())[0]
+
+        if version_db < 1:
             await db.execute("""
-                CREATE TABLE IF NOT EXISTS aventureros (
-                    user_id INTEGER PRIMARY KEY,
-                    char_name TEXT NOT NULL,
-                    char_race TEXT NOT NULL,
-                    char_class TEXT NOT NULL,
-                    char_age INTEGER NOT NULL,
-                    char_height TEXT NOT NULL,
-                    sheet_link TEXT NOT NULL,
-                    nivel INTEGER DEFAULT 1,
-                    sesiones_jugadas INTEGER DEFAULT 0
-                )
+                INSERT OR IGNORE INTO personajes_estados (user_id)
+                SELECT id_entidad FROM cuentas_bancarias;
             """)
+            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0);")
 
-            # Motor de migración interna de aventureros
-            async with db.execute("PRAGMA table_info(aventureros)") as cursor:
-                columnas_existentes = [columna["name"] for columna in await cursor.fetchall()]
-
-            if "nivel" not in columnas_existentes:
-                await db.execute("ALTER TABLE aventureros ADD COLUMN nivel INTEGER DEFAULT 1")
-            if "sesiones_jugadas" not in columnas_existentes:
-                await db.execute("ALTER TABLE aventureros ADD COLUMN sesiones_jugadas INTEGER DEFAULT 0")
-
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_aventureros_ladder ON aventureros (nivel DESC, sesiones_jugadas DESC)")
-
-            # 2. Sistema de Matchmaking
+            # BLINDAJE DE INTEGRIDAD: Prevenir violaciones de Foreign Key de usuarios inexistentes en tabla maestra
             await db.execute("""
-                CREATE TABLE IF NOT EXISTS matchmaking (
-                    user_id INTEGER PRIMARY KEY,
-                    rol_busqueda TEXT NOT NULL,
-                    tier_juego TEXT,
-                    dias_disponibles TEXT NOT NULL,
-                    hora_inicio_utc INTEGER NOT NULL,
-                    hora_fin_utc INTEGER NOT NULL
-                )
+                INSERT OR IGNORE INTO personajes_estados (user_id)
+                SELECT DISTINCT user_id FROM inventarios;
             """)
 
-            # 3. Registro de Dungeon Masters
             await db.execute("""
-                CREATE TABLE IF NOT EXISTS registro_dms (
-                    dm_id INTEGER PRIMARY KEY,
-                    nombre_dm TEXT NOT NULL,
-                    rango_licencia TEXT DEFAULT 'Aprendiz',
-                    partidas_narradas INTEGER DEFAULT 0
-                )
+                INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc)
+                SELECT id_entidad, 0 FROM cuentas_bancarias;
             """)
-
-            # 4. Urna Transaccional Anónima (Reseñas)
             await db.execute("""
-                CREATE TABLE IF NOT EXISTS reseñas_dms (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    dm_id INTEGER NOT NULL,
-                    valoracion INTEGER NOT NULL,
-                    comentario TEXT,
-                    FOREIGN KEY (dm_id) REFERENCES registro_dms(dm_id)
+                UPDATE economia_billetera
+                SET balance_pc = balance_pc + (
+                    SELECT balance_pc FROM cuentas_bancarias
+                    WHERE id_entidad = economia_billetera.user_id
                 )
+                WHERE user_id IN (SELECT id_entidad FROM cuentas_bancarias);
             """)
 
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_resenas_dm_id ON reseñas_dms (dm_id)")
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_dms_partidas ON registro_dms (partidas_narradas DESC)")
-
-            # 5. Control de Anclas de Embeds
             await db.execute("""
-                CREATE TABLE IF NOT EXISTS control_nominas (
-                    seccion TEXT PRIMARY KEY,
-                    channel_id INTEGER NOT NULL,
-                    message_id INTEGER NOT NULL
-                )
+                INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad)
+                SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_'), 0
+                FROM inventarios;
             """)
-
-            # 6. Personal Administrativo
             await db.execute("""
-                CREATE TABLE IF NOT EXISTS personal_ramas (
-                    user_id INTEGER PRIMARY KEY,
-                    division TEXT NOT NULL,
-                    rango_interno TEXT NOT NULL
+                UPDATE inventario_materiales
+                SET cantidad = cantidad + (
+                    SELECT SUM(cantidad) FROM inventarios
+                    WHERE user_id = inventario_materiales.user_id
+                      AND REPLACE(LOWER(producto_nombre), ' ', '_') = inventario_materiales.item_id
                 )
-            """)
-
-            # 7. Balances Legacy
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS cuentas_bancarias (
-                    id_entidad INTEGER PRIMARY KEY,
-                    balance_pc INTEGER DEFAULT 0
-                )
-            """)
-
-            # 8. Catálogo de Tienda
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS tienda_productos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nombre TEXT NOT NULL COLLATE NOCASE,
-                    precio_str TEXT NOT NULL,
-                    costo_pc INTEGER NOT NULL,
-                    categoria TEXT NOT NULL,
-                    descripcion TEXT NOT NULL
-                )
-            """)
-
-            # 9. Infraestructura del Histórico Relacional Padre-Hijo (Anti-Colisiones Estocásticas)
-            await db.executescript("""
-                CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    folio INTEGER NOT NULL,
-                    dm_id INTEGER NOT NULL,
-                    timestamp INTEGER NOT NULL,
-                    aventura TEXT NOT NULL,
-                    recompensa_pc INTEGER NOT NULL,
-                    recompensa_objeto VARCHAR(50) DEFAULT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS auditoria_sesiones_jugadores (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    auditoria_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    FOREIGN KEY (auditoria_id) REFERENCES auditoria_sesiones_fallidas(id) ON DELETE CASCADE
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_auditoria_sesiones_jugadores_auditoria ON auditoria_sesiones_jugadores(auditoria_id);
-            """)
-
-            # SCHEMA V3 CANÓNICO ASTERIA: Infraestructura Trustless Normalizada
-            await db.executescript("""
-                CREATE TABLE IF NOT EXISTS matriz_recompensas (
-                    rango_dm VARCHAR(20) NOT NULL,
-                    nivel_personaje INTEGER NOT NULL,
-                    max_pc_permitido INTEGER NOT NULL,
-                    max_rareza VARCHAR(20) NOT NULL,
-                    PRIMARY KEY (rango_dm, nivel_personaje)
-                );
-
-                CREATE TABLE IF NOT EXISTS personajes_estados (
-                    user_id INTEGER PRIMARY KEY,
-                    estado_viajando BOOLEAN DEFAULT 0,
-                    viaje_desbloqueo_timestamp INTEGER DEFAULT 0,
-                    nivel_extenuacion INTEGER DEFAULT 0,
-                    estado_herido BOOLEAN DEFAULT 0,
-                    pendiente_auditoria BOOLEAN DEFAULT 0,
-                    anillo_geografico_id INTEGER DEFAULT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS economia_billetera (
-                    user_id INTEGER PRIMARY KEY,
-                    balance_pc INTEGER DEFAULT 0 CHECK(balance_pc >= 0),
-                    FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS inventario_materiales (
-                    user_id INTEGER NOT NULL,
-                    item_id VARCHAR(50) NOT NULL,
-                    cantidad INTEGER NOT NULL CHECK(cantidad >= 0),
-                    PRIMARY KEY (user_id, item_id),
-                    FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS inventario_instancias (
-                    instance_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    item_id VARCHAR(50) NOT NULL,
-                    durabilidad_actual INTEGER NOT NULL CHECK(durabilidad_actual >= 0),
-                    grado_runa INTEGER DEFAULT 0,
-                    estado_critico BOOLEAN DEFAULT 0,
-                    FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS registro_recetas_conocidas (
-                    user_id INTEGER NOT NULL,
-                    receta_id VARCHAR(50) NOT NULL,
-                    PRIMARY KEY (user_id, receta_id),
-                    FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS registro_tickets (
-                    channel_id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    estado VARCHAR(20) DEFAULT 'ABIERTO'
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_inventario_materiales_user ON inventario_materiales(user_id);
-                CREATE INDEX IF NOT EXISTS idx_inventario_instancias_user ON inventario_instancias(user_id);
-                CREATE INDEX IF NOT EXISTS idx_registro_recetas_user ON registro_recetas_conocidas(user_id);
-            """)
-
-            # Inventarios Legacy
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS inventarios (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    producto_nombre TEXT NOT NULL,
-                    cantidad INTEGER DEFAULT 1,
-                    origen TEXT DEFAULT 'tienda',
-                    FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-                )
-            """)
-
-            # Puente de Retrocompatibilidad de Esquema
-            async with db.execute("PRAGMA table_info(personajes_estados)") as cursor:
-                columnas_estados = [columna["name"] for columna in await cursor.fetchall()]
-
-            if "anillo_geografico_id" not in columnas_estados:
-                await db.execute("ALTER TABLE personajes_estados ADD COLUMN anillo_geografico_id INTEGER DEFAULT NULL")
-
-            # Rutinas de Migración y Porteo Atómico Histórico
-            async with db.execute("PRAGMA user_version") as cursor:
-                version_db = (await cursor.fetchone())[0]
-
-            if version_db < 1:
-                await db.execute("""
-                    INSERT OR IGNORE INTO personajes_estados (user_id)
-                    SELECT id_entidad FROM cuentas_bancarias;
-                """)
-                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0);")
-
-                # BLINDAJE DE INTEGRIDAD: Prevenir violaciones de Foreign Key de usuarios inexistentes en tabla maestra
-                await db.execute("""
-                    INSERT OR IGNORE INTO personajes_estados (user_id)
-                    SELECT DISTINCT user_id FROM inventarios;
-                """)
-
-                await db.execute("""
-                    INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc)
-                    SELECT id_entidad, 0 FROM cuentas_bancarias;
-                """)
-                await db.execute("""
-                    UPDATE economia_billetera
-                    SET balance_pc = balance_pc + (
-                        SELECT balance_pc FROM cuentas_bancarias
-                        WHERE id_entidad = economia_billetera.user_id
-                    )
-                    WHERE user_id IN (SELECT id_entidad FROM cuentas_bancarias);
-                """)
-
-                await db.execute("""
-                    INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad)
-                    SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_'), 0
-                    FROM inventarios;
-                """)
-                await db.execute("""
-                    UPDATE inventario_materiales
-                    SET cantidad = cantidad + (
-                        SELECT SUM(cantidad) FROM inventarios
-                        WHERE user_id = inventario_materiales.user_id
-                          AND REPLACE(LOWER(producto_nombre), ' ', '_') = inventario_materiales.item_id
-                    )
-                    WHERE (user_id, item_id) IN (
-                        SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_') FROM inventarios
-                    );
-                """)
-
-                await db.execute("PRAGMA user_version = 1")
-
-            # Tablas Mecánicas de Nivel20
-            await db.executescript("""
-                CREATE TABLE IF NOT EXISTS ficha_estadisticas (
-                    user_id INTEGER PRIMARY KEY,
-                    fuerza INTEGER NOT NULL,
-                    destreza INTEGER NOT NULL,
-                    constitucion INTEGER NOT NULL,
-                    inteligencia INTEGER NOT NULL,
-                    sabiduria INTEGER NOT NULL,
-                    carisma INTEGER NOT NULL,
-                    iniciativa TEXT NOT NULL,
-                    velocidad TEXT NOT NULL,
-                    competencia TEXT NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS ficha_clases (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    clase TEXT NOT NULL,
-                    nivel INTEGER NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS ficha_rasgos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    nombre TEXT NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS ficha_conjuros (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    nombre TEXT NOT NULL,
-                    nivel TEXT NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+                WHERE (user_id, item_id) IN (
+                    SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_') FROM inventarios
                 );
             """)
 
-            try:
-                await db.execute("ALTER TABLE inventarios ADD COLUMN origen TEXT DEFAULT 'tienda'")
-            except Exception:
-                pass
+            await db.execute("PRAGMA user_version = 1")
+            print("🔧 [MIGRACIÓN] Ejecutado el porteo histórico V3 sin oclusiones relacionales.")
 
-            # Inicialización de la Bóveda Central (Protegida)
-            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 20000000)")
-            await db.execute("UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = 0 AND balance_pc < 20000000")
+        # Tablas Mecánicas de Nivel20
+        await db.executescript("""
+            CREATE TABLE IF NOT EXISTS ficha_estadisticas (
+                user_id INTEGER PRIMARY KEY,
+                fuerza INTEGER NOT NULL,
+                destreza INTEGER NOT NULL,
+                constitucion INTEGER NOT NULL,
+                inteligencia INTEGER NOT NULL,
+                sabiduria INTEGER NOT NULL,
+                carisma INTEGER NOT NULL,
+                iniciativa TEXT NOT NULL,
+                velocidad TEXT NOT NULL,
+                competencia TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS ficha_clases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                clase TEXT NOT NULL,
+                nivel INTEGER NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS ficha_rasgos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                nombre TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS ficha_conjuros (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                nombre TEXT NOT NULL,
+                nivel TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
+            );
+        """)
+
+        try:
+            await db.execute("ALTER TABLE inventarios ADD COLUMN origen TEXT DEFAULT 'tienda'")
+        except Exception:
+            pass
+
+        await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 20000000)")
+        await db.execute("UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = 0 AND balance_pc < 20000000")
 
 # --- CONSULTAS OPTIMIZADAS ---
 
@@ -343,52 +347,80 @@ async def obtener_personaje(user_id: int):
 
 async def registrar_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("""
                 INSERT INTO aventureros (user_id, char_name, char_race, char_class, char_age, char_height, sheet_link, nivel, sesiones_jugadas)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)
             """, (user_id, name, race, char_class, age, height, link))
 
 async def eliminar_personaje(user_id: int) -> bool:
-    async with get_db() as db:
-        async with transaction(db):
-            async with db.execute("DELETE FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
-                return cursor.rowcount > 0
+    try:
+        async with get_db() as db:
+
+                async with db.execute("DELETE FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 async def guardar_registro_matchmaking(user_id: int, rol: str, tier: str, dias: str, inicio: int, fin: int):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("""
                 INSERT OR REPLACE INTO matchmaking (user_id, rol_busqueda, tier_juego, dias_disponibles, hora_inicio_utc, hora_fin_utc)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (user_id, rol, tier, dias, inicio, fin))
 
-async def eliminar_de_cola(user_id: int):
-    async with get_db() as db:
-        async with transaction(db):
-            async with db.execute("DELETE FROM matchmaking WHERE user_id = ?", (user_id,)) as cursor:
-                return cursor.rowcount > 0
+async def eliminar_de_cola(user_id: int) -> bool:
+    try:
+        async with get_db() as db:
+
+                async with db.execute("DELETE FROM matchmaking WHERE user_id = ?", (user_id,)) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 async def obtener_toda_la_cola():
     async with get_db() as db:
         async with db.execute("SELECT user_id, rol_busqueda, tier_juego, dias_disponibles, hora_inicio_utc, hora_fin_utc FROM matchmaking") as cursor:
             return await cursor.fetchall()
 
-async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int):
-    async with get_db() as db:
-        async with transaction(db):
-            async with db.execute("UPDATE aventureros SET nivel = ? WHERE user_id = ?", (nuevo_nivel, user_id)) as cursor:
-                return cursor.rowcount > 0
+async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int) -> bool:
+    try:
+        async with get_db() as db:
 
-async def editar_datos_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str):
-    async with get_db() as db:
-        async with transaction(db):
-            async with db.execute("""
-                UPDATE aventureros
-                SET char_name = ?, char_race = ?, char_class = ?, char_age = ?, char_height = ?, sheet_link = ?
-                WHERE user_id = ?
-            """, (name, race, char_class, age, height, link, user_id)) as cursor:
-                return cursor.rowcount > 0
+                async with db.execute("UPDATE aventureros SET nivel = ? WHERE user_id = ?", (nuevo_nivel, user_id)) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
+
+async def editar_datos_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str) -> bool:
+    try:
+        async with get_db() as db:
+
+                async with db.execute("""
+                    UPDATE aventureros
+                    SET char_name = ?, char_race = ?, char_class = ?, char_age = ?, char_height = ?, sheet_link = ?
+                    WHERE user_id = ?
+                """, (name, race, char_class, age, height, link, user_id)) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 async def obtener_perfil_dm(dm_id: int):
     query = """
@@ -455,7 +487,7 @@ async def obtener_ladder_dms():
 
 async def registrar_ancla_nomina(seccion: str, channel_id: int, message_id: int):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("INSERT OR REPLACE INTO control_nominas (seccion, channel_id, message_id) VALUES (?, ?, ?)", (seccion, channel_id, message_id))
 
 async def obtener_ancla_nomina(seccion: str):
@@ -465,12 +497,12 @@ async def obtener_ancla_nomina(seccion: str):
 
 async def actualizar_miembro_personal(user_id: int, division: str, rango: str):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("INSERT OR REPLACE INTO personal_ramas (user_id, division, rango_interno) VALUES (?, ?, ?)", (user_id, division, rango))
 
 async def remover_miembro_personal(user_id: int):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("DELETE FROM personal_ramas WHERE user_id = ?", (user_id,))
 
 async def obtener_personal_division(division: str):
@@ -518,109 +550,128 @@ async def obtener_balance(id_entidad: int) -> int:
 
 async def inyectar_fondos_ignorados(dm_id: int, nombre_dm: str, valor: int, label_voto: str):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("INSERT OR IGNORE INTO registro_dms (dm_id, nombre_dm) VALUES (?, ?)", (dm_id, nombre_dm))
             await db.execute("INSERT INTO reseñas_dms (dm_id, valoracion, comentario) VALUES (?, ?, ?)", (dm_id, valor, f"Voto directo: {label_voto}"))
 
 async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) -> bool:
     if cantidad_pc <= 0:
         return False
+    try:
+        async with get_db() as db:
 
-    async with get_db() as db:
-        async with transaction(db):
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (emisor_id,))
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
-            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (emisor_id,))
-            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
+                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (emisor_id,))
+                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
+                await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (emisor_id,))
+                await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
 
-            async with db.execute(
-                "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = ? AND balance_pc >= ?",
-                (cantidad_pc, emisor_id, cantidad_pc)
-            ) as cursor:
-                if cursor.rowcount == 0:
-                    return False
+                async with db.execute(
+                    "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = ? AND balance_pc >= ?",
+                    (cantidad_pc, emisor_id, cantidad_pc)
+                ) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
 
-            await db.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_id))
-            return True
+                await db.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_id))
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 async def procesar_nominas_masivas(pagos_pendientes: dict, total_gasto_pc: int) -> bool:
-    async with get_db() as db:
-        async with transaction(db):
-            async with db.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = 0") as cursor:
-                boveda = await cursor.fetchone()
-                if not boveda or boveda["balance_pc"] < total_gasto_pc:
-                    return False
+    try:
+        async with get_db() as db:
 
-            await db.execute(
-                "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0",
-                (total_gasto_pc,)
-            )
+                async with db.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = 0") as cursor:
+                    boveda = await cursor.fetchone()
+                    if not boveda or boveda["balance_pc"] < total_gasto_pc:
+                        raise TransactionLogicError()
 
-            for u_id, monto in pagos_pendientes.items():
-                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (u_id,))
-                await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (u_id,))
                 await db.execute(
-                    "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
-                    (monto, u_id)
+                    "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0",
+                    (total_gasto_pc,)
                 )
-            return True
+
+                for u_id, monto in pagos_pendientes.items():
+                    await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (u_id,))
+                    await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (u_id,))
+                    await db.execute(
+                        "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
+                        (monto, u_id)
+                    )
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception as e:
+        import logging
+        logging.error(f"Error procesando nóminas masivas: {e}")
+        return False
 
 async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
-    async with get_db() as db:
-        async with transaction(db):
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
-            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
-            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
+    try:
+        async with get_db() as db:
 
-            async with db.execute(
-                "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0 AND balance_pc >= ?",
-                (cantidad_pc, cantidad_pc)
-            ) as cursor:
-                if cursor.rowcount == 0:
-                    return False
+                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
+                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
+                await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
+                await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
 
-            await db.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_id))
-            return True
+                async with db.execute(
+                    "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0 AND balance_pc >= ?",
+                    (cantidad_pc, cantidad_pc)
+                ) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
+
+                await db.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?", (cantidad_pc, receptor_id))
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 async def procesar_compra_gremial(user_id: int, producto_nombre: str, costo_pc: int) -> bool:
     item_id = producto_nombre.lower().replace(" ", "_")
+    try:
+        async with get_db() as db:
 
-    async with get_db() as db:
-        async with transaction(db):
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
-            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (user_id,))
-            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
+                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
+                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
+                await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (user_id,))
+                await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
 
-            async with db.execute(
-                "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = ? AND balance_pc >= ?",
-                (costo_pc, user_id, costo_pc)
-            ) as cursor:
-                if cursor.rowcount == 0:
-                    return False
+                async with db.execute(
+                    "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = ? AND balance_pc >= ?",
+                    (costo_pc, user_id, costo_pc)
+                ) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
 
-            await db.execute(
-                "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0",
-                (costo_pc,)
-            )
+                await db.execute(
+                    "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0",
+                    (costo_pc,)
+                )
 
-            await db.execute(
-                "INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)",
-                (user_id, item_id)
-            )
-            await db.execute(
-                "UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?",
-                (user_id, item_id)
-            )
-
-            return True
+                await db.execute(
+                    "INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)",
+                    (user_id, item_id)
+                )
+                await db.execute(
+                    "UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?",
+                    (user_id, item_id)
+                )
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 # --- TICKETS ---
 
 async def registrar_ticket(channel_id: int, user_id: int):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("INSERT OR REPLACE INTO registro_tickets (channel_id, user_id, estado) VALUES (?, ?, 'ABIERTO')", (channel_id, user_id))
 
 async def obtener_creador_ticket(channel_id: int):
@@ -631,7 +682,7 @@ async def obtener_creador_ticket(channel_id: int):
 
 async def cerrar_ticket_db(channel_id: int):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("UPDATE registro_tickets SET estado = 'CERRADO' WHERE channel_id = ?", (channel_id,))
 
 # --- TIENDA E INVENTARIOS ---
@@ -643,21 +694,28 @@ async def obtener_catalogo():
 
 async def agregar_producto_db(nombre: str, precio_str: str, costo_pc: int, categoria: str, descripcion: str):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("""
                 INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
                 VALUES (?, ?, ?, ?, ?)
             """, (nombre, precio_str, costo_pc, categoria, descripcion))
 
 async def eliminar_producto_db(nombre: str) -> bool:
-    async with get_db() as db:
-        async with transaction(db):
-            async with db.execute("DELETE FROM tienda_productos WHERE nombre = ? COLLATE NOCASE", (nombre,)) as cursor:
-                return cursor.rowcount > 0
+    try:
+        async with get_db() as db:
+
+                async with db.execute("DELETE FROM tienda_productos WHERE nombre = ? COLLATE NOCASE", (nombre,)) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 async def migrar_catalogo_inicial(catalogo_base: dict):
     async with get_db() as db:
-        async with transaction(db):
+
             async with db.execute("SELECT COUNT(*) as cuenta FROM tienda_productos") as cursor:
                 row = await cursor.fetchone()
                 if row and row["cuenta"] > 0:
@@ -672,21 +730,24 @@ async def migrar_catalogo_inicial(catalogo_base: dict):
 
 async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: str = 'tienda'):
     item_id = producto_nombre.lower().replace(" ", "_")
-    async with get_db() as db:
-        async with transaction(db):
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
+    try:
+        async with get_db() as db:
 
-            if origen == 'nivel20':
-                return
+                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
 
-            await db.execute(
-                "INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)",
-                (user_id, item_id)
-            )
-            await db.execute(
-                "UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?",
-                (user_id, item_id)
-            )
+                if origen == 'nivel20':
+                    return
+
+                await db.execute(
+                    "INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)",
+                    (user_id, item_id)
+                )
+                await db.execute(
+                    "UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?",
+                    (user_id, item_id)
+                )
+    except Exception as e:
+        print(f"Error agregando item: {e}")
 
 async def obtener_inventario_usuario(user_id: int):
     async with get_db() as db:
@@ -698,23 +759,28 @@ async def obtener_inventario_usuario(user_id: int):
 
 async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
     item_id = producto_nombre.lower().replace(" ", "_")
-    async with get_db() as db:
-        async with transaction(db):
-            async with db.execute(
-                "UPDATE inventario_materiales SET cantidad = cantidad - 1 WHERE user_id = ? AND item_id = ? AND cantidad > 0",
-                (user_id, item_id)
-            ) as cursor:
-                if cursor.rowcount == 0:
-                    return False
+    try:
+        async with get_db() as db:
 
-            await db.execute("DELETE FROM inventario_materiales WHERE user_id = ? AND cantidad <= 0", (user_id,))
-            return True
+                async with db.execute(
+                    "UPDATE inventario_materiales SET cantidad = cantidad - 1 WHERE user_id = ? AND item_id = ? AND cantidad > 0",
+                    (user_id, item_id)
+                ) as cursor:
+                    if cursor.rowcount == 0:
+                        raise TransactionLogicError()
+
+                await db.execute("DELETE FROM inventario_materiales WHERE user_id = ? AND cantidad <= 0", (user_id,))
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 # --- FICHA NIVEL20 ---
 
 async def guardar_datos_ficha_nivel20(user_id: int, stats: dict):
     async with get_db() as db:
-        async with transaction(db):
+
             await db.execute("DELETE FROM ficha_estadisticas WHERE user_id = ?", (user_id,))
             await db.execute("""
                 INSERT INTO ficha_estadisticas (user_id, fuerza, destreza, constitucion, inteligencia, sabiduria, carisma, iniciativa, velocidad, competencia)
@@ -760,34 +826,44 @@ async def obtener_datos_ficha_completos(user_id: int):
 # --- CONTROLES FISCALES ---
 
 async def embargar_fondos(user_id: int) -> int:
-    async with get_db() as db:
-        async with transaction(db):
-            async with db.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (user_id,)) as cursor:
-                row = await cursor.fetchone()
-                if not row or row["balance_pc"] <= 0:
-                    return 0
-                saldo_recuperado = row["balance_pc"]
+    try:
+        async with get_db() as db:
 
-            await db.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id = ?", (user_id,))
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
-            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
-            await db.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_recuperado,))
-            return saldo_recuperado
+                async with db.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if not row or row["balance_pc"] <= 0:
+                        raise TransactionLogicError()
+                    saldo_recuperado = row["balance_pc"]
 
-async def embargo_masivo() -> int:
-    async with get_db() as db:
-        async with transaction(db):
-            saldo_total_recuperado = 0
-            async with db.execute("SELECT SUM(balance_pc) as total FROM economia_billetera WHERE user_id != 0") as cursor:
-                row = await cursor.fetchone()
-                if row and row["total"]:
-                    saldo_total_recuperado = row["total"]
-
-            if saldo_total_recuperado > 0:
-                await db.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id != 0")
+                await db.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id = ?", (user_id,))
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
                 await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
-                await db.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_total_recuperado,))
+                await db.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_recuperado,))
+                return saldo_recuperado
+    except TransactionLogicError:
+        return 0
+    except Exception:
+        return 0
 
-            return saldo_total_recuperado
+async def embargo_masivo() -> int:
+    try:
+        async with get_db() as db:
+
+                saldo_total_recuperado = 0
+                async with db.execute("SELECT SUM(balance_pc) as total FROM economia_billetera WHERE user_id != 0") as cursor:
+                    row = await cursor.fetchone()
+                    if row and row["total"]:
+                        saldo_total_recuperado = row["total"]
+
+                if saldo_total_recuperado > 0:
+                    await db.execute("UPDATE economia_billetera SET balance_pc = 0 WHERE user_id != 0")
+                    await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
+                    await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 0)")
+                    await db.execute("UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = 0", (saldo_total_recuperado,))
+
+                return saldo_total_recuperado
+    except TransactionLogicError:
+        return 0
+    except Exception:
+        return 0
 
