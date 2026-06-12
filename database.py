@@ -196,6 +196,12 @@ async def init_db():
             FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS registro_tickets (
+            channel_id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            estado VARCHAR(20) DEFAULT 'ABIERTO'
+        );
+
         CREATE INDEX IF NOT EXISTS idx_inventario_materiales_user ON inventario_materiales(user_id);
         CREATE INDEX IF NOT EXISTS idx_inventario_instancias_user ON inventario_instancias(user_id);
         CREATE INDEX IF NOT EXISTS idx_registro_recetas_user ON registro_recetas_conocidas(user_id);
@@ -320,7 +326,6 @@ async def init_db():
     # Inicialización de la Bóveda Central (Protegida)
     async with db_lock:
         try:
-            await _connection.execute("BEGIN")
             await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 20000000)")
             await _connection.execute("UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = 0 AND balance_pc < 20000000")
             await _connection.commit()
@@ -515,7 +520,6 @@ async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) 
 
     async with db_lock:
         try:
-            await _connection.execute("BEGIN")
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (emisor_id,))
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
             await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (emisor_id,))
@@ -536,10 +540,37 @@ async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) 
             await _connection.rollback()
             return False
 
+async def procesar_nominas_masivas(pagos_pendientes: dict, total_gasto_pc: int) -> bool:
+    """Procesa masivamente el pago de nóminas, debitando de la bóveda central e inyectando a los usuarios."""
+    async with db_lock:
+        try:
+            async with _connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = 0") as cursor:
+                boveda = await cursor.fetchone()
+                if not boveda or boveda["balance_pc"] < total_gasto_pc:
+                    return False
+
+            await _connection.execute(
+                "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0",
+                (total_gasto_pc,)
+            )
+
+            for u_id, monto in pagos_pendientes.items():
+                await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (u_id,))
+                await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (u_id,))
+                await _connection.execute(
+                    "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
+                    (monto, u_id)
+                )
+            await _connection.commit()
+            return True
+        except Exception as e:
+            await _connection.rollback()
+            print(f"❌ Error procesando nóminas masivas: {e}")
+            return False
+
 async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
     async with db_lock:
         try:
-            await _connection.execute("BEGIN")
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (receptor_id,))
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0)")
             await _connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (receptor_id,))
@@ -559,6 +590,31 @@ async def emitir_fondos_reserva(receptor_id: int, cantidad_pc: int) -> bool:
         except Exception:
             await _connection.rollback()
             return False
+
+# --- TICKETS ---
+
+async def registrar_ticket(channel_id: int, user_id: int):
+    async with db_lock:
+        try:
+            await _connection.execute("INSERT OR REPLACE INTO registro_tickets (channel_id, user_id, estado) VALUES (?, ?, 'ABIERTO')", (channel_id, user_id))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            print(f"❌ Error al registrar ticket: {e}")
+
+async def obtener_creador_ticket(channel_id: int):
+    async with _connection.execute("SELECT user_id FROM registro_tickets WHERE channel_id = ?", (channel_id,)) as cursor:
+        row = await cursor.fetchone()
+        return row["user_id"] if row else None
+
+async def cerrar_ticket_db(channel_id: int):
+    async with db_lock:
+        try:
+            await _connection.execute("UPDATE registro_tickets SET estado = 'CERRADO' WHERE channel_id = ?", (channel_id,))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            print(f"❌ Error al cerrar ticket en BD: {e}")
 
 # --- TIENDA E INVENTARIOS ---
 
@@ -597,7 +653,6 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: st
     item_id = producto_nombre.lower().replace(" ", "_")
     async with db_lock:
         try:
-            await _connection.execute("BEGIN")
             await _connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
 
             if origen == 'nivel20':
@@ -628,7 +683,6 @@ async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
     item_id = producto_nombre.lower().replace(" ", "_")
     async with db_lock:
         try:
-            await _connection.execute("BEGIN")
             async with _connection.execute(
                 "UPDATE inventario_materiales SET cantidad = cantidad - 1 WHERE user_id = ? AND item_id = ? AND cantidad > 0",
                 (user_id, item_id)
@@ -695,7 +749,6 @@ async def obtener_datos_ficha_completos(user_id: int):
 async def embargar_fondos(user_id: int) -> int:
     async with db_lock:
         try:
-            await _connection.execute("BEGIN")
             async with _connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = ?", (user_id,)) as cursor:
                 row = await cursor.fetchone()
                 if not row or row["balance_pc"] <= 0:
@@ -716,7 +769,6 @@ async def embargar_fondos(user_id: int) -> int:
 async def embargo_masivo() -> int:
     async with db_lock:
         try:
-            await _connection.execute("BEGIN")
             saldo_total_recuperado = 0
             async with _connection.execute("SELECT SUM(balance_pc) as total FROM economia_billetera WHERE user_id != 0") as cursor:
                 row = await cursor.fetchone()

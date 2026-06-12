@@ -12,6 +12,34 @@ class VozDinamicaCog(commands.Cog):
         self.canales_temporales = {} 
 
     @commands.Cog.listener()
+    async def on_ready(self):
+        """Rutina de reconciliación estructural que barre y destruye los canales huérfanos remanentes,
+        o persiste el estado de las salas ocupadas en memoria tras un reinicio del bot."""
+        print("🧹 [VOZ] Iniciando rutina de reconciliación de canales temporales...")
+        for guild in self.bot.guilds:
+            categoria_destino = guild.get_channel(config.CATEGORIA_VOZ_TEMPORAL)
+            if not categoria_destino:
+                continue
+
+            for canal in categoria_destino.voice_channels:
+                if canal.id == config.CANAL_HUB_VOZ:
+                    continue
+
+                # Si el canal está vacío, eliminarlo (Canal Fantasma)
+                if len(canal.members) == 0:
+                    try:
+                        await canal.delete(reason="Rutina de limpieza post-reinicio: Canal temporal remanente con 0 miembros.")
+                        print(f"🧹 [VOZ] Canal fantasma {canal.id} purgado exitosamente.")
+                    except discord.Forbidden:
+                        print(f"❌ [VOZ] Error: Permisos insuficientes para purgar canal {canal.id}.")
+                    except discord.HTTPException as e:
+                        print(f"⚠️ [VOZ] Error de red purgando canal {canal.id}: {e}")
+                else:
+                    # Persistir en memoria el primer miembro como dueño temporal
+                    self.canales_temporales[canal.id] = canal.members[0].id
+                    print(f"🔄 [VOZ] Canal temporal {canal.id} reconciliado en memoria con dueño {canal.members[0].name}.")
+
+    @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         guild = member.guild
         if not guild:

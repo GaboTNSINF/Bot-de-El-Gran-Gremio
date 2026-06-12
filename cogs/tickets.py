@@ -26,14 +26,11 @@ class VistaReclamacion(discord.ui.View):
             await interaction.response.send_message("❌ No perteneces al escalafón del Gremio para reclamar este caso.", ephemeral=True)
             return
 
-        # 2. EXTRACCIÓN DE METADATOS (Persistencia del Creador del Ticket)
-        # Extraemos la ID del usuario desde el topic del canal usando expresiones regulares
-        match = re.search(r"Creador:\s*(\d+)", canal_actual.topic or "")
-        if not match:
-            await interaction.response.send_message("❌ **Error de Integridad:** No se pudieron recuperar los metadatos de este ticket en el canal.", ephemeral=True)
+        # 2. EXTRACCIÓN DE METADATOS (Persistencia Relacional)
+        usuario_creador_id = await database.obtener_creador_ticket(canal_actual.id)
+        if not usuario_creador_id:
+            await interaction.response.send_message("❌ **Error de Integridad:** No se encontró registro en la base de datos de este ticket.", ephemeral=True)
             return
-            
-        usuario_creador_id = int(match.group(1))
 
         # 3. FILTRO DE INTEGRIDAD: Evitar auto-reclamos
         if staff_miembro.id == usuario_creador_id:
@@ -136,7 +133,7 @@ class TicketBotonera(discord.ui.View):
             # Diferir la respuesta inmediatamente para evitar excepciones por el handshake con la API de Discord
             await interaction.response.defer(ephemeral=True)
             
-            # Crear canal inyectando la persistencia de la ID en el topic de forma explícita
+            # Crear canal inyectando la persistencia de la ID en el topic (puramente informativo, ya no se usa para lógica)
             nuevo_canal = await guild.create_text_channel(
                 name=nombre_canal,
                 category=categoria,
@@ -145,6 +142,9 @@ class TicketBotonera(discord.ui.View):
                 reason=f"Ticket de admisión creado por {usuario.name}"
             )
             
+            # Persistir en SQLite para robustez transaccional
+            await database.registrar_ticket(nuevo_canal.id, usuario.id)
+
             # Enviamos el mensaje inside-ticket adjuntando la vista de reclamación persistente vacía
             await nuevo_canal.send(mensaje_bienvenida, view=VistaReclamacion())
             await interaction.followup.send(f"✅ Ticket creado con éxito: {nuevo_canal.mention}", ephemeral=True)
@@ -187,6 +187,7 @@ class TicketsCog(commands.Cog):
             await asyncio.sleep(3)
             
             try:
+                await database.cerrar_ticket_db(ctx.channel.id)
                 await ctx.channel.delete(reason=f"Clausura de ticket ejecutada por {ctx.user.name}")
             except discord.NotFound:
                 pass  # Mitigar excepciones concurrentes de destrucción
