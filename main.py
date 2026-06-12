@@ -17,14 +17,6 @@ class GremioBot(discord.Bot):
         print(f"🤖 BOT DEL GREMIO ACTIVADO EN PRODUCCIÓN")
         print(f"👤 Conectado como: {self.user.name} ({self.user.id})")
         print(f"==========================================")
-        try:
-            await init_db()
-            print("💾 Base de datos 'gremio.db' verificada e inicializada con ruta absoluta.")
-        except Exception as e:
-            print(f"❌ Error Crítico al inicializar la Base de Datos: {e}")
-            import sys
-            await self.close()
-            sys.exit(1)
 
     async def on_member_join(self, member):
         """Módulo Auto-Rol: Asigna el rol VIAJERO inmediatamente al ingresar al servidor."""
@@ -81,6 +73,14 @@ async def ejecutar_bot():
             print(f"❌ Error al cargar {ext}: {e}")
 
     try:
+        try:
+            await init_db()
+            print("💾 Base de datos 'gremio.db' verificada e inicializada con ruta absoluta.")
+        except Exception as e:
+            print(f"❌ Error Crítico al inicializar la Base de Datos: {e}")
+            import sys
+            sys.exit(1)
+
         print("🔌 Conectando con los servidores de Discord...")
         await bot.start(config.TOKEN)
     finally:

@@ -108,8 +108,6 @@ class EconomiaCog(commands.Cog):
             "locutor": 20000
         }
 
-        total_empleados_pagados = 0
-        total_gasto_pc = 0
         pagos_pendientes = {}
 
         for key_rama, datos_rama in config.CONFIG_RAMAS.items():
@@ -117,9 +115,7 @@ class EconomiaCog(commands.Cog):
             if rol_jefe:
                 for jefe in rol_jefe.members:
                     sueldo_jefe = escala_salarial["jefe"]
-                    pagos_pendientes[int(jefe.id)] = pagos_pendientes.get(int(jefe.id), 0) + sueldo_jefe
-                    total_empleados_pagados += 1
-                    total_gasto_pc += sueldo_jefe
+                    pagos_pendientes[int(jefe.id)] = max(pagos_pendientes.get(int(jefe.id), 0), sueldo_jefe)
 
             personal_rama = await database.obtener_personal_division(key_rama)
             if personal_rama:
@@ -127,10 +123,10 @@ class EconomiaCog(commands.Cog):
                     u_id = int(empleado["user_id"])
                     rango = empleado["rango_interno"].lower()
                     sueldo_asignado = escala_salarial.get(rango, 10000)
+                    pagos_pendientes[u_id] = max(pagos_pendientes.get(u_id, 0), sueldo_asignado)
 
-                    pagos_pendientes[u_id] = pagos_pendientes.get(u_id, 0) + sueldo_asignado
-                    total_empleados_pagados += 1
-                    total_gasto_pc += sueldo_asignado
+        total_empleados_pagados = len(pagos_pendientes)
+        total_gasto_pc = sum(pagos_pendientes.values())
 
         if total_empleados_pagados == 0:
             await ctx.followup.send("📝 **Nómina vacía:** No hay personal registrado en los libros del Gremio.")
