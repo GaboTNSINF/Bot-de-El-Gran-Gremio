@@ -12,11 +12,15 @@ DB_PATH = os.path.join(BASE_DIR, "gremio.db")
 _connection = None
 
 # Lock Global de Exclusión Mutua para serializar transacciones de escritura.
-db_lock = asyncio.Lock()
+db_lock = None
 
 async def init_db():
-    """Inicializa la conexión persistente y forja las entidades relacionales."""
-    global _connection
+    """Inicializa la conexión y el cerrojo dentro del loop de eventos activo."""
+    global _connection, db_lock
+
+    if db_lock is None:
+        db_lock = asyncio.Lock()
+
     if _connection is None:
         _connection = await aiosqlite.connect(DB_PATH)
         await _connection.execute("PRAGMA foreign_keys = ON")
@@ -355,12 +359,13 @@ async def registrar_personaje(user_id: int, name: str, race: str, char_class: st
             await _connection.rollback()
             raise e
 
-async def eliminar_personaje(user_id: int):
+async def eliminar_personaje(user_id: int) -> bool:
+    global _connection, db_lock
     async with db_lock:
         try:
             async with _connection.execute("DELETE FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
                 if cursor.rowcount == 0:
-                    await _connection.rollback()
+                    await _connection.commit()
                     return False
             await _connection.commit()
             return True
@@ -381,11 +386,12 @@ async def guardar_registro_matchmaking(user_id: int, rol: str, tier: str, dias: 
             raise e
 
 async def eliminar_de_cola(user_id: int):
+    global _connection, db_lock
     async with db_lock:
         try:
             async with _connection.execute("DELETE FROM matchmaking WHERE user_id = ?", (user_id,)) as cursor:
                 if cursor.rowcount == 0:
-                    await _connection.rollback()
+                    await _connection.commit()
                     return False
             await _connection.commit()
             return True
@@ -398,11 +404,12 @@ async def obtener_toda_la_cola():
         return await cursor.fetchall()
 
 async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int):
+    global _connection, db_lock
     async with db_lock:
         try:
             async with _connection.execute("UPDATE aventureros SET nivel = ? WHERE user_id = ?", (nuevo_nivel, user_id)) as cursor:
                 if cursor.rowcount == 0:
-                    await _connection.rollback()
+                    await _connection.commit()
                     return False
             await _connection.commit()
             return True
@@ -411,6 +418,7 @@ async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int):
             raise e
 
 async def editar_datos_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str):
+    global _connection, db_lock
     async with db_lock:
         try:
             async with _connection.execute("""
@@ -419,7 +427,7 @@ async def editar_datos_personaje(user_id: int, name: str, race: str, char_class:
                 WHERE user_id = ?
             """, (name, race, char_class, age, height, link, user_id)) as cursor:
                 if cursor.rowcount == 0:
-                    await _connection.rollback()
+                    await _connection.commit()
                     return False
             await _connection.commit()
             return True

@@ -47,8 +47,9 @@ class VistaReclamacion(discord.ui.View):
         # Confirmamos la mutación visual de la interfaz de forma atómica
         await interaction.response.edit_message(view=self)
 
+        bot_client = interaction.client
         # 5. OBTENCIÓN DE ENTIDADES
-        usuario_creador = guild.get_member(usuario_creador_id) or await self.bot.get_or_fetch_member(guild, usuario_creador_id)
+        usuario_creador = guild.get_member(usuario_creador_id) or await bot_client.get_or_fetch_member(guild, usuario_creador_id)
 
         # 6. CONSOLIDACIÓN DE LA MATRIZ DE SOBREESCRITURA DE PERMISOS
         overwrites = {
