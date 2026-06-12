@@ -30,6 +30,12 @@ ROLES_CREACION_NOMINAS = [
     1509954249436696758   # ID Rol Co-Fundador
 ]
 
+# Alta gerencia con control directo de bóveda, embargos y emisión de moneda
+ROLES_TESORERIA = [
+    1509952429586780332,  # ID Rol Fundador
+    1509954249436696758   # ID Rol Co-Fundador
+]
+
 # Rangos autorizados para aprobar fichas nuevas (/aprobar_ficha)
 # Solo de Oficial para arriba tienen la autoridad de sellar las fichas en la Base de Datos.
 ROLES_APROBACION = [

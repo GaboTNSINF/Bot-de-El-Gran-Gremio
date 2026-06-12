@@ -22,6 +22,9 @@ class GremioBot(discord.Bot):
             print("💾 Base de datos 'gremio.db' verificada e inicializada con ruta absoluta.")
         except Exception as e:
             print(f"❌ Error Crítico al inicializar la Base de Datos: {e}")
+            import sys
+            await self.close()
+            sys.exit(1)
 
     async def on_member_join(self, member):
         """Módulo Auto-Rol: Asigna el rol VIAJERO inmediatamente al ingresar al servidor."""

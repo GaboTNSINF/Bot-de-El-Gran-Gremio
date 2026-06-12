@@ -75,6 +75,15 @@ def init_v4_schema():
         );
     """)
 
+    # 7. Registro de tickets
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS registro_tickets (
+            channel_id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            estado VARCHAR(20) DEFAULT 'ABIERTO'
+        );
+    """)
+
     # INDICES
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventario_materiales_user ON inventario_materiales(user_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inventario_instancias_user ON inventario_instancias(user_id);")

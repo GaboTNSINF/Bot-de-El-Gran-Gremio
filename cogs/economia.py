@@ -41,7 +41,7 @@ class EconomiaCog(commands.Cog):
 
     @commands.slash_command(name="boveda_gremial", description="[HIGH STAFF] Consulta el balance de las arcas centrales.")
     async def boveda_gremial(self, ctx: discord.ApplicationContext):
-        if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
+        if not any(rol.id in config.ROLES_TESORERIA for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado:** No posees las llaves de la Tesorería.", ephemeral=True)
             return
 
@@ -85,7 +85,7 @@ class EconomiaCog(commands.Cog):
 
     @commands.slash_command(name="emitir_nominas", description="[SUPREME] Emite los sueldos de todo el personal gremial registrado en nómina de forma masiva.")
     async def emitir_nominas(self, ctx: discord.ApplicationContext):
-        if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
+        if not any(rol.id in config.ROLES_TESORERIA for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado:** Solo los Fundadores pueden ejecutar el pago de nóminas masivo.", ephemeral=True)
             return
 
@@ -136,33 +136,11 @@ class EconomiaCog(commands.Cog):
             await ctx.followup.send("📝 **Nómina vacía:** No hay personal registrado en los libros del Gremio.")
             return
 
-        async with database.db_lock:
-            try:
-                await database._connection.execute("BEGIN")
-                async with database._connection.execute("SELECT balance_pc FROM economia_billetera WHERE user_id = 0") as cursor:
-                    boveda = await cursor.fetchone()
-                    if not boveda or boveda["balance_pc"] < total_gasto_pc:
-                        await database._connection.rollback()
-                        await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA:** La Bóveda no tiene liquidez. Abortado.")
-                        return
+        exito = await database.procesar_nominas_masivas(pagos_pendientes, total_gasto_pc)
 
-                await database._connection.execute(
-                    "UPDATE economia_billetera SET balance_pc = balance_pc - ? WHERE user_id = 0",
-                    (total_gasto_pc,)
-                )
-
-                for u_id, monto in pagos_pendientes.items():
-                    await database._connection.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (u_id,))
-                    await database._connection.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (?, 0)", (u_id,))
-                    await database._connection.execute(
-                        "UPDATE economia_billetera SET balance_pc = balance_pc + ? WHERE user_id = ?",
-                        (monto, u_id)
-                    )
-                await database._connection.commit()
-            except Exception as e:
-                await database._connection.rollback()
-                await ctx.followup.send(f"❌ **Error Crítico de Dispersión:** {e}. Rollback ejecutado.")
-                return
+        if not exito:
+            await ctx.followup.send(f"⚠️ **ALERTA DE BANCARROTA O ERROR:** La Bóveda no tiene liquidez suficiente o hubo un error transaccional. Abortado.")
+            return
 
         embed = discord.Embed(
             title="🏦 INFORME DE TESORERÍA: NÓMINAS EMITIDAS",
@@ -186,7 +164,7 @@ class EconomiaCog(commands.Cog):
         ]),
         cantidad: discord.Option(int, "Cantidad de monedas a emitir", min_value=1)
     ):
-        if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
+        if not any(rol.id in config.ROLES_TESORERIA for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado:** Requiere credenciales de la Alta Directiva Suprema.", ephemeral=True)
             return
 
@@ -220,7 +198,7 @@ class EconomiaCog(commands.Cog):
 
     @commands.slash_command(name="banco_embargar", description="[SUPREME] Incauta todo el dinero de un usuario y lo devuelve a la Bóveda Central.")
     async def banco_embargar(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Usuario a embargar")):
-        if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
+        if not any(rol.id in config.ROLES_TESORERIA for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado.**", ephemeral=True)
             return
 
@@ -246,7 +224,7 @@ class EconomiaCog(commands.Cog):
 
     @commands.slash_command(name="banco_wipe_beta", description="[SUPREME] Vacía las cuentas de TODO EL SERVIDOR.")
     async def banco_wipe_beta(self, ctx: discord.ApplicationContext):
-        if not any(rol.id in [1509952429586780332, 1509954249436696758] for rol in ctx.user.roles):
+        if not any(rol.id in config.ROLES_TESORERIA for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado.**", ephemeral=True)
             return
 
