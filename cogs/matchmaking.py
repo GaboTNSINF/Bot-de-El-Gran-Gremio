@@ -215,7 +215,6 @@ class MatchmakingCog(commands.Cog):
             return False
 
         # REGLA 1: Aislamiento estricto del Bloque de Aprendizaje (Nivel 1 y 2)
-        # NOTA EDUCATIVA: Usamos iteradores (any y all) porque son mucho más rápidos en memoria
         # que recorrer la lista entera con un for clásico si encontramos un true temprano (short-circuit).
         if any(n in [1, 2] for n in niveles):
             return all(n in [1, 2] for n in niveles)
@@ -233,7 +232,6 @@ class MatchmakingCog(commands.Cog):
             quorum_objetivo = int(dm["tier_juego"]) if dm["tier_juego"].isdigit() else 4
             
             # EJECUCIÓN INDUSTRIAL: SQLite hace todo el trabajo de tiempo; Python recibe datos limpios
-            # NOTA EDUCATIVA: En la refactorización de database.py, blindamos que la query entienda los "cruces de medianoche".
             # Eso evita que un jugador que juega de 22:00 a 02:00 se filtre incorrectamente.
             candidatos = await database.obtener_candidatos_compatibles_dm(dm_id, quorum_objetivo)
             

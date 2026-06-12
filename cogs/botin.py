@@ -15,7 +15,6 @@ class BotinCog(commands.Cog):
         ctx: discord.ApplicationContext,
         dificultad: discord.Option(str, "Tier de desafío del encuentro", choices=["Básico (Nivel 1-4)", "Intermedio (Nivel 5-10)", "Avanzado (Nivel 11-16)", "Jefe Épico (Nivel 17+)"])
     ):
-        # NOTA EDUCATIVA: Este comando ayuda a los DMs a no tener que inventar el oro en el momento.
         # Las probabilidades están ajustadas para que los jefes den objetos raros y las criaturas básicas solo chatarra.
 
         monedas_texto = ""

@@ -10,7 +10,6 @@ from config import ROLES_EDICION_MATRICULA
 class SelectCategoriaTienda(discord.ui.Select):
     """Menú desplegable para navegar el catálogo dinámico desde la BD."""
     def __init__(self, categorias_disponibles: list):
-        # NOTA EDUCATIVA: Generamos las opciones dinámicamente según las categorías que existan en la BD.
         options = []
         for cat in categorias_disponibles:
             # Agregamos emojis por defecto dependiendo de la categoría si es conocida
@@ -62,7 +61,6 @@ class TiendaCog(commands.Cog):
 
     @commands.slash_command(name="tienda", description="Abre el catálogo interactivo del Gremio de forma privada.")
     async def tienda(self, ctx: discord.ApplicationContext):
-        # NOTA EDUCATIVA: Al usar ephemeral=True, el jugador puede ver el menú sin inundar el canal
         # de rol donde los demás están escribiendo.
         catalogo = await database.obtener_catalogo()
         if not catalogo:
@@ -83,7 +81,6 @@ class TiendaCog(commands.Cog):
     async def comprar(self, ctx: discord.ApplicationContext, objeto: discord.Option(str, "Escribe el nombre del objeto tal cual sale en la /tienda")):
         await ctx.response.defer(ephemeral=True)
 
-        # Buscar el objeto en la base de datos de forma insensible a mayúsculas
         objeto_buscado = objeto.lower().strip()
         catalogo = await database.obtener_catalogo()
 
@@ -99,18 +96,13 @@ class TiendaCog(commands.Cog):
 
         costo_cobre = item_encontrado["costo_pc"]
 
-        # BLINDAJE DE ECONOMÍA: Usamos transferir_fondos (id 0 = Bóveda Central)
-        # Esto deduce el oro atómicamente. Si el jugador no tiene dinero, retorna False.
-        exito = await database.transferir_fondos(ctx.user.id, 0, costo_cobre)
+        # Delegate business logic to atomic DB function
+        exito = await database.procesar_compra_gremial(ctx.user.id, item_encontrado["nombre"], costo_cobre)
 
         if not exito:
             await ctx.followup.send(f"❌ **Fondos Insuficientes:** No tienes las `{item_encontrado['precio_str']}` necesarias para comprar el objeto `{item_encontrado['nombre']}`.", ephemeral=True)
             return
 
-        # Guardar en el inventario
-        await database.agregar_item_inventario(ctx.user.id, item_encontrado["nombre"])
-
-        # Si la compra fue exitosa, emitimos un recibo PRIVADO para no inundar el chat
         embed_recibo = discord.Embed(
             title="🧾 COMPROBANTE DE COMPRA OFICIAL",
             description=f"Has adquirido suministros en las tiendas del Gremio.",
@@ -122,10 +114,8 @@ class TiendaCog(commands.Cog):
 
         await ctx.followup.send(embed=embed_recibo, ephemeral=True)
 
-        # NOTA EDUCATIVA: Enviar log silencioso a auditoría financiera
-        from config import CANAL_BUZON_SECRETARIA # Reutilizando un canal de log interno, idealmente el de auditoría
-        # Para cumplir con "Administrative and financial actions must be silently logged to 1513250885730570442"
-        log_channel = self.bot.get_channel(1513250885730570442)
+        from config import CANAL_LOGS_ID
+        log_channel = self.bot.get_channel(CANAL_LOGS_ID)
         if log_channel:
             await log_channel.send(f"💸 [TIENDA] {ctx.user.mention} compró `{item_encontrado['nombre']}` por {item_encontrado['precio_str']}.")
 

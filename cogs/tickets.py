@@ -183,7 +183,6 @@ class TicketsCog(commands.Cog):
 
         # Validación estructural estricta de seguridad anti-vandalismo en canales públicos
         if "admision-" in ctx.channel.name or "⌛-" in ctx.channel.name:
-            # NOTA EDUCATIVA: Usamos ephemeral=False aquí para que el mensaje se mande al chat
             # del canal que está a punto de borrarse.
             await ctx.respond("🧹 Clausurando y eliminando canal en 3 segundos...")
             await asyncio.sleep(3)
