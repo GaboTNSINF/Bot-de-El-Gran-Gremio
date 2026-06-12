@@ -12,7 +12,6 @@ class DadosCog(commands.Cog):
 
     @commands.slash_command(name="tirar", description="Lanza dados de rol. Ej: 1d20, 2d6+3, 4d8-1")
     async def tirar(self, ctx: discord.ApplicationContext, formula: discord.Option(str, "Fórmula del dado (ej: 1d20, 2d6+3)", required=True)):
-        # NOTA EDUCATIVA: Usamos expresiones regulares (Regex) para analizar la fórmula escrita por el usuario de forma segura.
         # Buscamos: (cantidad)d(caras)(modificador)
         # Ejemplo: 2d6+3 -> Cantidad=2, Caras=6, Modificador=+3
         patron = r"^(\d+)d(\d+)([+-]\d+)?$"
@@ -71,7 +70,6 @@ class DadosCog(commands.Cog):
         if nota_critica:
             embed.add_field(name="Estado", value=nota_critica, inline=False)
 
-        # NOTA EDUCATIVA: Aquí NO usamos ephemeral=True. Al ser una tirada de rol,
         # TODOS en el canal deben ver el resultado para asegurar que no hay trampas (transparencia).
         await ctx.respond(embed=embed)
 

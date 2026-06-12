@@ -59,7 +59,6 @@ class ComunidadCog(commands.Cog):
         
         embed.set_footer(text="Gremio de Aventureros • Datos Protegidos e Inmutables")
 
-        # NOTA EDUCATIVA: Agregamos una vista para incorporar el botón interactivo de Inventario.
         view = None
 
         # Validación de roles para poder ver el inventario ajeno
@@ -184,7 +183,6 @@ class SelectUsoInventario(discord.ui.Select):
         if exito:
             await interaction.followup.send(f"🧪 **Objeto utilizado:** Has consumido/usado 1x `{objeto_elegido}`.", ephemeral=True)
 
-            # NOTA EDUCATIVA: Opcionalmente se puede enviar un mensaje público en el canal
             # para que los demás jugadores sepan que usó una poción o ración.
             try:
                 await interaction.channel.send(f"🎒 El aventurero **{self.nombre_pj}** ha utilizado un objeto: `{objeto_elegido}`.")

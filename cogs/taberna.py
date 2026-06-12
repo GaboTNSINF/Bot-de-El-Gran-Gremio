@@ -92,7 +92,6 @@ class TabernaCog(commands.Cog):
             await ctx.followup.send("❌ No tienes fondos para esta apuesta.", ephemeral=True)
             return
 
-        # NOTA EDUCATIVA: Generamos la interfaz de 3 botones de forma dinámica.
         class BotonesCubilete(discord.ui.View):
             def __init__(self):
                 super().__init__(timeout=60)
@@ -173,7 +172,6 @@ class TabernaCog(commands.Cog):
             await ctx.followup.send("❌ Tus bolsillos están vacíos. Retírate de la mesa.", ephemeral=True)
             return
 
-        # NOTA EDUCATIVA: Lógica pura de Python para barajar cartas.
         # Creamos una baraja infinita (con reemplazo) para simplificar la lógica de memoria,
         # asignando valores fijos a las figuras (J, Q, K = 10) y Ases (11 o 1 según convenga).
         cartas = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11] * 4

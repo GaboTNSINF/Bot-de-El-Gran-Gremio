@@ -41,7 +41,6 @@ async def main():
     res = await database.eliminar_de_cola(99)
     assert res is False
 
-    await database.cerrar_db()
     print("Tests passed")
 
 asyncio.run(main())

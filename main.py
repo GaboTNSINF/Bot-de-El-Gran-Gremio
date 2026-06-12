@@ -1,9 +1,11 @@
+import logging
+import traceback
 # main.py
 
 import asyncio
 import discord
 import config
-from database import init_db, cerrar_db
+from database import init_db
 
 # Configuración estricta de Intents (Permisos de red del bot)
 intents = discord.Intents.default()
@@ -17,6 +19,38 @@ class GremioBot(discord.Bot):
         print(f"🤖 BOT DEL GREMIO ACTIVADO EN PRODUCCIÓN")
         print(f"👤 Conectado como: {self.user.name} ({self.user.id})")
         print(f"==========================================")
+
+
+    async def on_application_command_error(self, ctx: discord.ApplicationContext, error: discord.DiscordException):
+        # Log the exact stack trace to the console
+        logging.error(f"Ignoring exception in command {ctx.command}:", exc_info=error)
+
+        # Dispatch a sanitized embed to the logs channel
+        canal_logs = self.get_channel(config.CANAL_LOGS_ID)
+        if canal_logs:
+            embed = discord.Embed(
+                title="⚠️ Alerta de Sistema: Excepción Capturada",
+                description=f"Se ha producido un error durante la ejecución del comando `/{ctx.command.name if ctx.command else 'desconocido'}`.",
+                color=discord.Color.red()
+            )
+            embed.add_field(name="Usuario", value=ctx.user.mention, inline=True)
+            embed.add_field(name="Canal", value=ctx.channel.mention if hasattr(ctx.channel, 'mention') else str(ctx.channel), inline=True)
+            embed.add_field(name="Tipo de Error", value=f"`{type(error).__name__}`", inline=False)
+
+            try:
+                await canal_logs.send(embed=embed)
+            except Exception as e:
+                logging.error(f"No se pudo enviar el log de error a Discord: {e}")
+
+        # Respond to the user gracefully if possible
+        mensaje_usuario = "❌ Ocurrió un error inesperado al procesar tu solicitud. El equipo técnico ha sido notificado."
+        try:
+            if ctx.response.is_done():
+                await ctx.followup.send(mensaje_usuario, ephemeral=True)
+            else:
+                await ctx.respond(mensaje_usuario, ephemeral=True)
+        except Exception:
+            pass
 
     async def on_member_join(self, member):
         """Módulo Auto-Rol: Asigna el rol VIAJERO inmediatamente al ingresar al servidor."""
@@ -41,7 +75,6 @@ async def ejecutar_bot():
     y garantiza el cierre limpio de conexiones asíncronas (Discord + SQLite).
     """
     # Inicialización del Bot diferida dentro del loop activo
-    # NOTA EDUCATIVA: Instanciar el bot aquí (dentro de un contexto async) es una práctica excelente.
     # Previene el clásico error de Pycord: "Future attached to a different loop" al reiniciar conexiones.
     bot = GremioBot(intents=intents, debug_guilds=[config.GUILD_ID])
 
@@ -90,7 +123,6 @@ async def ejecutar_bot():
         if not bot.is_closed():
             await bot.close()
 
-        await cerrar_db()
         print("👋 [APAGADO] Proceso finalizado de forma limpia. Bóveda resguardada.\n")
 
 
