@@ -1,6 +1,7 @@
 # cogs/tickets.py
 
 import discord
+import database
 from discord.ext import commands
 import config
 import asyncio

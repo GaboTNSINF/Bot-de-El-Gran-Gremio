@@ -344,54 +344,88 @@ async def obtener_personaje(user_id: int):
         return await cursor.fetchone()
 
 async def registrar_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str):
-    await _connection.execute("""
-        INSERT INTO aventureros (user_id, char_name, char_race, char_class, char_age, char_height, sheet_link, nivel, sesiones_jugadas)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)
-    """, (user_id, name, race, char_class, age, height, link))
-    await _connection.commit()
+    async with db_lock:
+        try:
+            await _connection.execute("""
+                INSERT INTO aventureros (user_id, char_name, char_race, char_class, char_age, char_height, sheet_link, nivel, sesiones_jugadas)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)
+            """, (user_id, name, race, char_class, age, height, link))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def eliminar_personaje(user_id: int):
-    async with _connection.execute("DELETE FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
-        if cursor.rowcount == 0:
-            return False
-    await _connection.commit()
-    return True
+    async with db_lock:
+        try:
+            async with _connection.execute("DELETE FROM aventureros WHERE user_id = ?", (user_id,)) as cursor:
+                if cursor.rowcount == 0:
+                    await _connection.rollback()
+                    return False
+            await _connection.commit()
+            return True
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def guardar_registro_matchmaking(user_id: int, rol: str, tier: str, dias: str, inicio: int, fin: int):
-    await _connection.execute("""
-        INSERT OR REPLACE INTO matchmaking (user_id, rol_busqueda, tier_juego, dias_disponibles, hora_inicio_utc, hora_fin_utc)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (user_id, rol, tier, dias, inicio, fin))
-    await _connection.commit()
+    async with db_lock:
+        try:
+            await _connection.execute("""
+                INSERT OR REPLACE INTO matchmaking (user_id, rol_busqueda, tier_juego, dias_disponibles, hora_inicio_utc, hora_fin_utc)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (user_id, rol, tier, dias, inicio, fin))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def eliminar_de_cola(user_id: int):
-    async with _connection.execute("DELETE FROM matchmaking WHERE user_id = ?", (user_id,)) as cursor:
-        if cursor.rowcount == 0:
-            return False
-    await _connection.commit()
-    return True
+    async with db_lock:
+        try:
+            async with _connection.execute("DELETE FROM matchmaking WHERE user_id = ?", (user_id,)) as cursor:
+                if cursor.rowcount == 0:
+                    await _connection.rollback()
+                    return False
+            await _connection.commit()
+            return True
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def obtener_toda_la_cola():
     async with _connection.execute("SELECT user_id, rol_busqueda, tier_juego, dias_disponibles, hora_inicio_utc, hora_fin_utc FROM matchmaking") as cursor:
         return await cursor.fetchall()
 
 async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int):
-    async with _connection.execute("UPDATE aventureros SET nivel = ? WHERE user_id = ?", (nuevo_nivel, user_id)) as cursor:
-        if cursor.rowcount == 0:
-            return False
-    await _connection.commit()
-    return True   
+    async with db_lock:
+        try:
+            async with _connection.execute("UPDATE aventureros SET nivel = ? WHERE user_id = ?", (nuevo_nivel, user_id)) as cursor:
+                if cursor.rowcount == 0:
+                    await _connection.rollback()
+                    return False
+            await _connection.commit()
+            return True
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def editar_datos_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str):
-    async with _connection.execute("""
-        UPDATE aventureros 
-        SET char_name = ?, char_race = ?, char_class = ?, char_age = ?, char_height = ?, sheet_link = ?
-        WHERE user_id = ?
-    """, (name, race, char_class, age, height, link, user_id)) as cursor:
-        if cursor.rowcount == 0:
-            return False
-    await _connection.commit()
-    return True
+    async with db_lock:
+        try:
+            async with _connection.execute("""
+                UPDATE aventureros
+                SET char_name = ?, char_race = ?, char_class = ?, char_age = ?, char_height = ?, sheet_link = ?
+                WHERE user_id = ?
+            """, (name, race, char_class, age, height, link, user_id)) as cursor:
+                if cursor.rowcount == 0:
+                    await _connection.rollback()
+                    return False
+            await _connection.commit()
+            return True
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def obtener_perfil_dm(dm_id: int):
     query = """
@@ -454,20 +488,35 @@ async def obtener_ladder_dms():
     return ladder_completo
 
 async def registrar_ancla_nomina(seccion: str, channel_id: int, message_id: int):
-    await _connection.execute("INSERT OR REPLACE INTO control_nominas (seccion, channel_id, message_id) VALUES (?, ?, ?)", (seccion, channel_id, message_id))
-    await _connection.commit()
+    async with db_lock:
+        try:
+            await _connection.execute("INSERT OR REPLACE INTO control_nominas (seccion, channel_id, message_id) VALUES (?, ?, ?)", (seccion, channel_id, message_id))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def obtener_ancla_nomina(seccion: str):
     async with _connection.execute("SELECT channel_id, message_id FROM control_nominas WHERE seccion = ?", (seccion,)) as cursor:
         return await cursor.fetchone()
 
 async def actualizar_miembro_personal(user_id: int, division: str, rango: str):
-    await _connection.execute("INSERT OR REPLACE INTO personal_ramas (user_id, division, rango_interno) VALUES (?, ?, ?)", (user_id, division, rango))
-    await _connection.commit()
+    async with db_lock:
+        try:
+            await _connection.execute("INSERT OR REPLACE INTO personal_ramas (user_id, division, rango_interno) VALUES (?, ?, ?)", (user_id, division, rango))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def remover_miembro_personal(user_id: int):
-    await _connection.execute("DELETE FROM personal_ramas WHERE user_id = ?", (user_id,))
-    await _connection.commit()
+    async with db_lock:
+        try:
+            await _connection.execute("DELETE FROM personal_ramas WHERE user_id = ?", (user_id,))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def obtener_personal_division(division: str):
     async with _connection.execute("SELECT user_id, rango_interno FROM personal_ramas WHERE division = ?", (division,)) as cursor:
@@ -510,9 +559,14 @@ async def obtener_balance(id_entidad: int) -> int:
         return resultado["balance_pc"] if resultado else 0
 
 async def inyectar_fondos_ignorados(dm_id: int, nombre_dm: str, valor: int, label_voto: str):
-    await _connection.execute("INSERT OR IGNORE INTO registro_dms (dm_id, nombre_dm) VALUES (?, ?)", (dm_id, nombre_dm))
-    await _connection.execute("INSERT INTO reseñas_dms (dm_id, valoracion, comentario) VALUES (?, ?, ?)", (dm_id, valor, f"Voto directo: {label_voto}"))
-    await _connection.commit()
+    async with db_lock:
+        try:
+            await _connection.execute("INSERT OR IGNORE INTO registro_dms (dm_id, nombre_dm) VALUES (?, ?)", (dm_id, nombre_dm))
+            await _connection.execute("INSERT INTO reseñas_dms (dm_id, valoracion, comentario) VALUES (?, ?, ?)", (dm_id, valor, f"Voto directo: {label_voto}"))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def transferir_fondos(emisor_id: int, receptor_id: int, cantidad_pc: int) -> bool:
     if cantidad_pc <= 0:
@@ -623,31 +677,49 @@ async def obtener_catalogo():
         return await cursor.fetchall()
 
 async def agregar_producto_db(nombre: str, precio_str: str, costo_pc: int, categoria: str, descripcion: str):
-    await _connection.execute("""
-        INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
-        VALUES (?, ?, ?, ?, ?)
-    """, (nombre, precio_str, costo_pc, categoria, descripcion))
-    await _connection.commit()
-
-async def eliminar_producto_db(nombre: str) -> bool:
-    async with _connection.execute("DELETE FROM tienda_productos WHERE nombre = ? COLLATE NOCASE", (nombre,)) as cursor:
-        exito = cursor.rowcount > 0
-    await _connection.commit()
-    return exito
-
-async def migrar_catalogo_inicial(catalogo_base: dict):
-    async with _connection.execute("SELECT COUNT(*) as cuenta FROM tienda_productos") as cursor:
-        row = await cursor.fetchone()
-        if row and row["cuenta"] > 0:
-            return
-
-    for categoria, items in catalogo_base.items():
-        for item in items:
+    async with db_lock:
+        try:
             await _connection.execute("""
                 INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
                 VALUES (?, ?, ?, ?, ?)
-            """, (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
-    await _connection.commit()
+            """, (nombre, precio_str, costo_pc, categoria, descripcion))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
+
+async def eliminar_producto_db(nombre: str) -> bool:
+    async with db_lock:
+        try:
+            async with _connection.execute("DELETE FROM tienda_productos WHERE nombre = ? COLLATE NOCASE", (nombre,)) as cursor:
+                exito = cursor.rowcount > 0
+                if not exito:
+                    await _connection.rollback()
+                    return False
+            await _connection.commit()
+            return True
+        except Exception as e:
+            await _connection.rollback()
+            raise e
+
+async def migrar_catalogo_inicial(catalogo_base: dict):
+    async with db_lock:
+        try:
+            async with _connection.execute("SELECT COUNT(*) as cuenta FROM tienda_productos") as cursor:
+                row = await cursor.fetchone()
+                if row and row["cuenta"] > 0:
+                    return
+
+            for categoria, items in catalogo_base.items():
+                for item in items:
+                    await _connection.execute("""
+                        INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: str = 'tienda'):
     item_id = producto_nombre.lower().replace(" ", "_")
@@ -701,29 +773,34 @@ async def usar_item_inventario(user_id: int, producto_nombre: str) -> bool:
 # --- FICHA NIVEL20 ---
 
 async def guardar_datos_ficha_nivel20(user_id: int, stats: dict):
-    await _connection.execute("DELETE FROM ficha_estadisticas WHERE user_id = ?", (user_id,))
-    await _connection.execute("""
-        INSERT INTO ficha_estadisticas (user_id, fuerza, destreza, constitucion, inteligencia, sabiduria, carisma, iniciativa, velocidad, competencia)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        user_id, stats.get('fuerza', 10), stats.get('destreza', 10), stats.get('constitucion', 10),
-        stats.get('inteligencia', 10), stats.get('sabiduria', 10), stats.get('carisma', 10),
-        stats.get('iniciativa', '+0'), stats.get('velocidad', '30 pies'), stats.get('competencia', '+2')
-    ))
+    async with db_lock:
+        try:
+            await _connection.execute("DELETE FROM ficha_estadisticas WHERE user_id = ?", (user_id,))
+            await _connection.execute("""
+                INSERT INTO ficha_estadisticas (user_id, fuerza, destreza, constitucion, inteligencia, sabiduria, carisma, iniciativa, velocidad, competencia)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                user_id, stats.get('fuerza', 10), stats.get('destreza', 10), stats.get('constitucion', 10),
+                stats.get('inteligencia', 10), stats.get('sabiduria', 10), stats.get('carisma', 10),
+                stats.get('iniciativa', '+0'), stats.get('velocidad', '30 pies'), stats.get('competencia', '+2')
+            ))
 
-    await _connection.execute("DELETE FROM ficha_clases WHERE user_id = ?", (user_id,))
-    for c in stats.get('clases', []):
-        await _connection.execute("INSERT INTO ficha_clases (user_id, clase, nivel) VALUES (?, ?, ?)", (user_id, c['nombre'], c['nivel']))
+            await _connection.execute("DELETE FROM ficha_clases WHERE user_id = ?", (user_id,))
+            for c in stats.get('clases', []):
+                await _connection.execute("INSERT INTO ficha_clases (user_id, clase, nivel) VALUES (?, ?, ?)", (user_id, c['nombre'], c['nivel']))
 
-    await _connection.execute("DELETE FROM ficha_rasgos WHERE user_id = ?", (user_id,))
-    for r in stats.get('rasgos', []):
-        await _connection.execute("INSERT INTO ficha_rasgos (user_id, nombre) VALUES (?, ?)", (user_id, r))
+            await _connection.execute("DELETE FROM ficha_rasgos WHERE user_id = ?", (user_id,))
+            for r in stats.get('rasgos', []):
+                await _connection.execute("INSERT INTO ficha_rasgos (user_id, nombre) VALUES (?, ?)", (user_id, r))
 
-    await _connection.execute("DELETE FROM ficha_conjuros WHERE user_id = ?", (user_id,))
-    for conjuro in stats.get('conjuros', []):
-        await _connection.execute("INSERT INTO ficha_conjuros (user_id, nombre, nivel) VALUES (?, ?, ?)", (user_id, conjuro['nombre'], conjuro['nivel']))
+            await _connection.execute("DELETE FROM ficha_conjuros WHERE user_id = ?", (user_id,))
+            for conjuro in stats.get('conjuros', []):
+                await _connection.execute("INSERT INTO ficha_conjuros (user_id, nombre, nivel) VALUES (?, ?, ?)", (user_id, conjuro['nombre'], conjuro['nivel']))
 
-    await _connection.commit()
+            await _connection.commit()
+        except Exception as e:
+            await _connection.rollback()
+            raise e
 
 async def obtener_datos_ficha_completos(user_id: int):
     datos = {}
