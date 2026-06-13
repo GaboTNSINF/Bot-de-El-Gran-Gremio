@@ -33,6 +33,8 @@ async def transaccion_gremial(db: aiosqlite.Connection):
 
 async def init_db():
     async with get_db() as db:
+        async with db.execute("PRAGMA user_version") as cursor:
+            version_db = (await cursor.fetchone())[0]
 
         # 1. Tabla de Aventureros
         await db.execute("""
@@ -237,55 +239,49 @@ async def init_db():
         if "anillo_geografico_id" not in columnas_estados:
             await db.execute("ALTER TABLE personajes_estados ADD COLUMN anillo_geografico_id INTEGER DEFAULT NULL")
 
-        # Rutinas de Migración y Porteo Atómico Histórico
-        async with db.execute("PRAGMA user_version") as cursor:
-            version_db = (await cursor.fetchone())[0]
+        async with transaccion_gremial(db):
+            if version_db < 1:
+                await db.execute("""
+                    INSERT OR IGNORE INTO personajes_estados (user_id)
+                    SELECT id_entidad FROM cuentas_bancarias;
+                """)
+                await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0);")
 
-        if version_db < 1:
-            await db.execute("""
-                INSERT OR IGNORE INTO personajes_estados (user_id)
-                SELECT id_entidad FROM cuentas_bancarias;
-            """)
-            await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (0);")
+                # BLINDAJE DE INTEGRIDAD: Prevenir violaciones de Foreign Key de usuarios inexistentes en tabla maestra
+                await db.execute("""
+                    INSERT OR IGNORE INTO personajes_estados (user_id)
+                    SELECT DISTINCT user_id FROM inventarios;
+                """)
 
-            # BLINDAJE DE INTEGRIDAD: Prevenir violaciones de Foreign Key de usuarios inexistentes en tabla maestra
-            await db.execute("""
-                INSERT OR IGNORE INTO personajes_estados (user_id)
-                SELECT DISTINCT user_id FROM inventarios;
-            """)
+                await db.execute("""
+                    INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc)
+                    SELECT id_entidad, 0 FROM cuentas_bancarias;
+                """)
+                await db.execute("""
+                    UPDATE economia_billetera
+                    SET balance_pc = balance_pc + (
+                        SELECT balance_pc FROM cuentas_bancarias
+                        WHERE id_entidad = economia_billetera.user_id
+                    )
+                    WHERE user_id IN (SELECT id_entidad FROM cuentas_bancarias);
+                """)
 
-            await db.execute("""
-                INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc)
-                SELECT id_entidad, 0 FROM cuentas_bancarias;
-            """)
-            await db.execute("""
-                UPDATE economia_billetera
-                SET balance_pc = balance_pc + (
-                    SELECT balance_pc FROM cuentas_bancarias
-                    WHERE id_entidad = economia_billetera.user_id
-                )
-                WHERE user_id IN (SELECT id_entidad FROM cuentas_bancarias);
-            """)
-
-            await db.execute("""
-                INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad)
-                SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_'), 0
-                FROM inventarios;
-            """)
-            await db.execute("""
-                UPDATE inventario_materiales
-                SET cantidad = cantidad + (
-                    SELECT SUM(cantidad) FROM inventarios
-                    WHERE user_id = inventario_materiales.user_id
-                      AND REPLACE(LOWER(producto_nombre), ' ', '_') = inventario_materiales.item_id
-                )
-                WHERE (user_id, item_id) IN (
-                    SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_') FROM inventarios
-                );
-            """)
-
-            await db.execute("PRAGMA user_version = 1")
-            print("🔧 [MIGRACIÓN] Ejecutado el porteo histórico V3 sin oclusiones relacionales.")
+                await db.execute("""
+                    INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad)
+                    SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_'), 0
+                    FROM inventarios;
+                """)
+                await db.execute("""
+                    UPDATE inventario_materiales
+                    SET cantidad = cantidad + (
+                        SELECT SUM(cantidad) FROM inventarios
+                        WHERE user_id = inventario_materiales.user_id
+                          AND REPLACE(LOWER(producto_nombre), ' ', '_') = inventario_materiales.item_id
+                    )
+                    WHERE (user_id, item_id) IN (
+                        SELECT user_id, REPLACE(LOWER(producto_nombre), ' ', '_') FROM inventarios
+                    );
+                """)
 
         # Tablas Mecánicas de Nivel20
         await db.executescript("""
@@ -332,8 +328,14 @@ async def init_db():
         except Exception:
             pass
 
-        await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 20000000)")
-        await db.execute("UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = 0 AND balance_pc < 20000000")
+        async with transaccion_gremial(db):
+            await db.execute("INSERT OR IGNORE INTO economia_billetera (user_id, balance_pc) VALUES (0, 20000000)")
+            await db.execute("UPDATE economia_billetera SET balance_pc = 20000000 WHERE user_id = 0 AND balance_pc < 20000000")
+
+        if version_db < 1:
+            await db.execute("PRAGMA user_version = 1")
+            print("🔧 [MIGRACIÓN] Ejecutado el porteo histórico V3 sin oclusiones relacionales.")
+
 
 # --- CONSULTAS OPTIMIZADAS ---
 
@@ -357,7 +359,7 @@ async def registrar_personaje(user_id: int, name: str, race: str, char_class: st
     except TransactionLogicError:
         return False
     except Exception:
-        return False
+        raise
 
 async def eliminar_personaje(user_id: int) -> bool:
     try:
@@ -372,7 +374,7 @@ async def eliminar_personaje(user_id: int) -> bool:
     except TransactionLogicError:
         return False
     except Exception:
-        return False
+        raise
 
 async def guardar_registro_matchmaking(user_id: int, rol: str, tier: str, dias: str, inicio: int, fin: int):
     async with get_db() as db:
@@ -396,7 +398,7 @@ async def eliminar_de_cola(user_id: int) -> bool:
     except TransactionLogicError:
         return False
     except Exception:
-        return False
+        raise
 
 async def obtener_toda_la_cola():
     async with get_db() as db:
@@ -416,7 +418,7 @@ async def actualizar_nivel_personaje(user_id: int, nuevo_nivel: int) -> bool:
     except TransactionLogicError:
         return False
     except Exception:
-        return False
+        raise
 
 async def editar_datos_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str) -> bool:
     try:
@@ -435,7 +437,7 @@ async def editar_datos_personaje(user_id: int, name: str, race: str, char_class:
     except TransactionLogicError:
         return False
     except Exception:
-        return False
+        raise
 
 async def obtener_perfil_dm(dm_id: int):
     query = """
