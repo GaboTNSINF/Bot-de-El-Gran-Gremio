@@ -36,6 +36,7 @@ async def init_db():
         async with db.execute("PRAGMA user_version") as cursor:
             version_db = (await cursor.fetchone())[0]
 
+        async with transaccion_gremial(db):
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS aventureros (
                     user_id INTEGER PRIMARY KEY,
@@ -127,8 +128,7 @@ async def init_db():
                 )
             ''')
 
-            await db.executescript('''
-                CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
+            await db.execute('''CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     folio INTEGER NOT NULL,
                     dm_id INTEGER NOT NULL,
@@ -136,28 +136,23 @@ async def init_db():
                     aventura TEXT NOT NULL,
                     recompensa_pc INTEGER NOT NULL,
                     recompensa_objeto VARCHAR(50) DEFAULT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS auditoria_sesiones_jugadores (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS auditoria_sesiones_jugadores (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     auditoria_id INTEGER NOT NULL,
                     user_id INTEGER NOT NULL,
                     FOREIGN KEY (auditoria_id) REFERENCES auditoria_sesiones_fallidas(id) ON DELETE CASCADE
-                );
+                )''')
+            await db.execute('''CREATE INDEX IF NOT EXISTS idx_auditoria_sesiones_jugadores_auditoria ON auditoria_sesiones_jugadores(auditoria_id)''')
 
-                CREATE INDEX IF NOT EXISTS idx_auditoria_sesiones_jugadores_auditoria ON auditoria_sesiones_jugadores(auditoria_id);
-            ''')
-
-            await db.executescript('''
-                CREATE TABLE IF NOT EXISTS matriz_recompensas (
+            await db.execute('''CREATE TABLE IF NOT EXISTS matriz_recompensas (
                     rango_dm VARCHAR(20) NOT NULL,
                     nivel_personaje INTEGER NOT NULL,
                     max_pc_permitido INTEGER NOT NULL,
                     max_rareza VARCHAR(20) NOT NULL,
                     PRIMARY KEY (rango_dm, nivel_personaje)
-                );
-
-                CREATE TABLE IF NOT EXISTS personajes_estados (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS personajes_estados (
                     user_id INTEGER PRIMARY KEY,
                     estado_viajando BOOLEAN DEFAULT 0,
                     viaje_desbloqueo_timestamp INTEGER DEFAULT 0,
@@ -165,23 +160,20 @@ async def init_db():
                     estado_herido BOOLEAN DEFAULT 0,
                     pendiente_auditoria BOOLEAN DEFAULT 0,
                     anillo_geografico_id INTEGER DEFAULT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS economia_billetera (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS economia_billetera (
                     user_id INTEGER PRIMARY KEY,
                     balance_pc INTEGER DEFAULT 0 CHECK(balance_pc >= 0),
                     FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS inventario_materiales (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS inventario_materiales (
                     user_id INTEGER NOT NULL,
                     item_id VARCHAR(50) NOT NULL,
                     cantidad INTEGER NOT NULL CHECK(cantidad >= 0),
                     PRIMARY KEY (user_id, item_id),
                     FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS inventario_instancias (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS inventario_instancias (
                     instance_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     item_id VARCHAR(50) NOT NULL,
@@ -189,25 +181,21 @@ async def init_db():
                     grado_runa INTEGER DEFAULT 0,
                     estado_critico BOOLEAN DEFAULT 0,
                     FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS registro_recetas_conocidas (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS registro_recetas_conocidas (
                     user_id INTEGER NOT NULL,
                     receta_id VARCHAR(50) NOT NULL,
                     PRIMARY KEY (user_id, receta_id),
                     FOREIGN KEY (user_id) REFERENCES personajes_estados(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS registro_tickets (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS registro_tickets (
                     channel_id INTEGER PRIMARY KEY,
                     user_id INTEGER NOT NULL,
                     estado VARCHAR(20) DEFAULT 'ABIERTO'
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_inventario_materiales_user ON inventario_materiales(user_id);
-                CREATE INDEX IF NOT EXISTS idx_inventario_instancias_user ON inventario_instancias(user_id);
-                CREATE INDEX IF NOT EXISTS idx_registro_recetas_user ON registro_recetas_conocidas(user_id);
-            ''')
+                )''')
+            await db.execute('''CREATE INDEX IF NOT EXISTS idx_inventario_materiales_user ON inventario_materiales(user_id)''')
+            await db.execute('''CREATE INDEX IF NOT EXISTS idx_inventario_instancias_user ON inventario_instancias(user_id)''')
+            await db.execute('''CREATE INDEX IF NOT EXISTS idx_registro_recetas_user ON registro_recetas_conocidas(user_id)''')
 
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS inventarios (
@@ -268,8 +256,7 @@ async def init_db():
                     );
                 ''')
 
-            await db.executescript('''
-                CREATE TABLE IF NOT EXISTS ficha_estadisticas (
+            await db.execute('''CREATE TABLE IF NOT EXISTS ficha_estadisticas (
                     user_id INTEGER PRIMARY KEY,
                     fuerza INTEGER NOT NULL,
                     destreza INTEGER NOT NULL,
@@ -281,31 +268,27 @@ async def init_db():
                     velocidad TEXT NOT NULL,
                     competencia TEXT NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS ficha_clases (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS ficha_clases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     clase TEXT NOT NULL,
                     nivel INTEGER NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS ficha_rasgos (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS ficha_rasgos (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     nombre TEXT NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS ficha_conjuros (
+                )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS ficha_conjuros (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     nombre TEXT NOT NULL,
                     nivel TEXT NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES aventureros(user_id) ON DELETE CASCADE
-                );
-            ''')
+                )''')
 
             try:
                 await db.execute("ALTER TABLE inventarios ADD COLUMN origen TEXT DEFAULT 'tienda'")
@@ -317,8 +300,7 @@ async def init_db():
 
         if version_db < 1:
             await db.execute("PRAGMA user_version = 1")
-            print("🔧 [MIGRACIÓN] Esquema e inicialización V3 consolidados de forma atómica.")
-
+            print("🔧 [MIGRACIÓN] Esquema, lógica relacional e inicialización V3 consolidados de forma atómica.")
 # --- CONSULTAS OPTIMIZADAS ---
 
 async def obtener_personaje(user_id: int):
@@ -765,9 +747,9 @@ async def migrar_catalogo_inicial(catalogo_base: dict) -> bool:
                 for categoria, items in catalogo_base.items():
                     for item in items:
                         await db.execute('''
-                            INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
-                            VALUES (?, ?, ?, ?, ?)
-                        ''', (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
+                                        INSERT INTO tienda_productos (nombre, precio_str, costo_pc, categoria, descripcion)
+                                        VALUES (?, ?, ?, ?, ?)
+                                    ''', (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
         return True
     except TransactionLogicError:
         return False
