@@ -322,6 +322,11 @@ async def registrar_personaje(user_id: int, name: str, race: str, char_class: st
         return True
     except TransactionLogicError:
         return False
+    except aiosqlite.IntegrityError as e:
+        error_msg = str(e).lower()
+        if "aventureros.user_id" in error_msg and ("unique" in error_msg or "primary key" in error_msg):
+            return False
+        raise
     except Exception:
         raise
 
@@ -534,8 +539,9 @@ async def obtener_candidatos_compatibles_dm(dm_id: int, limite_jugadores: int):
                       -
                       MAX(m.hora_inicio_utc, ?)
                   ) >= 180
+                LIMIT ?
             '''
-            async with db.execute(query, (dm_fin, dm_ini)) as cursor:
+            async with db.execute(query, (dm_fin, dm_ini, limite_jugadores)) as cursor:
                 return await cursor.fetchall()
         finally:
             await db.execute("COMMIT;")
