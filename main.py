@@ -8,6 +8,55 @@ import config
 from database import init_db
 
 # Configuración estricta de Intents (Permisos de red del bot)
+
+async def vista_global_on_error(self, error: Exception, item: discord.ui.Item, interaction: discord.Interaction):
+    bot_ref = interaction.client
+    error_real = getattr(error, "original", error)
+
+    mensaje_usuario = "❌ Ha ocurrido un error interno de infraestructura al procesar este menú. El equipo técnico ha sido notificado."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(mensaje_usuario, ephemeral=True)
+        else:
+            await interaction.response.send_message(mensaje_usuario, ephemeral=True)
+    except Exception:
+        pass
+
+    componente_info = getattr(item, "custom_id", str(type(item).__name__))
+    logging.error(f"Excepción en componente UI [{componente_info}]:", exc_info=error_real)
+
+    if hasattr(bot_ref, "_despachar_alerta_telemetria"):
+        await bot_ref._despachar_alerta_telemetria(
+            error_real=error_real,
+            contexto_origen=f"Componente UI (ID: {componente_info})",
+            usuario_involucrado=interaction.user
+        )
+
+async def modal_global_on_error(self, error: Exception, interaction: discord.Interaction):
+    bot_ref = interaction.client
+    error_real = getattr(error, "original", error)
+
+    mensaje_usuario = "❌ Ocurrió un error interno al procesar este formulario. El equipo técnico ha sido notificado."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(mensaje_usuario, ephemeral=True)
+        else:
+            await interaction.response.send_message(mensaje_usuario, ephemeral=True)
+    except Exception:
+        pass
+
+    logging.error(f"Excepción en componente Formulario [Modal: {type(self).__name__}]:", exc_info=error_real)
+
+    if hasattr(bot_ref, "_despachar_alerta_telemetria"):
+        await bot_ref._despachar_alerta_telemetria(
+            error_real=error_real,
+            contexto_origen=f"Formulario Modal ({type(self).__name__})",
+            usuario_involucrado=interaction.user
+        )
+
+discord.ui.View.on_error = vista_global_on_error
+discord.ui.Modal.on_error = modal_global_on_error
+
 intents = discord.Intents.default()
 intents.members = True          # Para detectar nuevos usuarios y cambiar roles
 intents.message_content = True  # Para leer la plantilla de texto plano en los tickets
@@ -21,28 +70,34 @@ class GremioBot(discord.Bot):
         print(f"==========================================")
 
 
-    async def on_application_command_error(self, ctx: discord.ApplicationContext, error: discord.DiscordException):
-        # Log the exact stack trace to the console
-        logging.error(f"Ignoring exception in command {ctx.command}:", exc_info=error)
-
-        # Dispatch a sanitized embed to the logs channel
+    async def _despachar_alerta_telemetria(self, error_real: Exception, contexto_origen: str, usuario_involucrado: discord.User = None):
         canal_logs = self.get_channel(config.CANAL_LOGS_ID)
-        if canal_logs:
-            embed = discord.Embed(
-                title="⚠️ Alerta de Sistema: Excepción Capturada",
-                description=f"Se ha producido un error durante la ejecución del comando `/{ctx.command.name if ctx.command else 'desconocido'}`.",
-                color=discord.Color.red()
-            )
-            embed.add_field(name="Usuario", value=ctx.user.mention, inline=True)
-            embed.add_field(name="Canal", value=ctx.channel.mention if hasattr(ctx.channel, 'mention') else str(ctx.channel), inline=True)
-            embed.add_field(name="Tipo de Error", value=f"`{type(error).__name__}`", inline=False)
+        if not canal_logs:
+            return
 
-            try:
-                await canal_logs.send(embed=embed)
-            except Exception as e:
-                logging.error(f"No se pudo enviar el log de error a Discord: {e}")
+        embed = discord.Embed(
+            title="⚠️ Alerta de Sistema: Excepción Capturada",
+            description=f"Se ha producido un fallo durante la ejecución de: `{contexto_origen}`.",
+            color=discord.Color.red()
+        )
+        if usuario_involucrado:
+            embed.add_field(name="Usuario", value=usuario_involucrado.mention, inline=True)
 
-        # Respond to the user gracefully if possible
+        embed.add_field(name="Tipo de Error", value=f"`{type(error_real).__name__}`", inline=False)
+
+        mensaje_error = str(error_real)
+        if len(mensaje_error) > 1000:
+            mensaje_error = mensaje_error[:1000] + "..."
+        embed.add_field(name="Detalle", value=f"```\n{mensaje_error}\n```", inline=False)
+
+        try:
+            await canal_logs.send(embed=embed)
+        except Exception as e_log:
+            logging.error(f"Fallo crítico enviando telemetría a Discord: {e_log}")
+
+    async def on_application_command_error(self, ctx: discord.ApplicationContext, error: discord.DiscordException):
+        error_real = getattr(error, "original", error)
+
         mensaje_usuario = "❌ Ocurrió un error inesperado al procesar tu solicitud. El equipo técnico ha sido notificado."
         try:
             if ctx.response.is_done():
@@ -51,6 +106,9 @@ class GremioBot(discord.Bot):
                 await ctx.respond(mensaje_usuario, ephemeral=True)
         except Exception:
             pass
+
+        logging.error(f"Excepción en comando /{ctx.command.name if ctx.command else 'desconocido'}:", exc_info=error_real)
+        await self._despachar_alerta_telemetria(error_real, f"Comando /{ctx.command.name if ctx.command else 'desconocido'}", ctx.user)
 
     async def on_member_join(self, member):
         """Módulo Auto-Rol: Asigna el rol VIAJERO inmediatamente al ingresar al servidor."""
