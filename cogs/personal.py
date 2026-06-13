@@ -12,9 +12,7 @@ class PersonalCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # =========================================================================
     # 👑 SECCIÓN: COMANDOS DE INICIALIZACIÓN (EXCLUSIVOS DEL FUNDADOR)
-    # =========================================================================
 
     async def _desplegar_ancla_base(self, ctx: discord.ApplicationContext, key_rama: str):
         """Función interna para clavar o resetear los Embeds fijos en el canal PERSONAL."""
@@ -53,9 +51,7 @@ class PersonalCog(commands.Cog):
         await self._desplegar_ancla_base(ctx, "noticias")
 
 
-    # =========================================================================
     # 🛠️ SECCIÓN: AUXILIARES Y SISTEMA INTELIGENTE DE AUTOCOMPLETADO
-    # =========================================================================
 
     def _es_alta_directiva(self, usuario: discord.Member) -> bool:
         """Determina si el usuario es Fundador o Co-Fundador."""
@@ -134,9 +130,7 @@ class PersonalCog(commands.Cog):
         return [r.capitalize() for r in config.CONFIG_RAMAS[key_rama]["rangos"].keys()]
 
 
-    # =========================================================================
     # 🪓 SECCIÓN: COMANDOS DE CONTROL DE PERSONAL (RECURSOS HUMANOS)
-    # =========================================================================
 
     @commands.slash_command(name="contratar", description="[STAFF] Añade un nuevo lacayo a las filas operativas.")
     async def contratar(

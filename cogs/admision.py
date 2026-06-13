@@ -116,9 +116,7 @@ class ConfirmacionRegistro(discord.ui.View):
             self.datos["link"]
         )
 
-        # ----------------------------------------------------
         # NUEVO FLUJO: Extracción Automática en la Admisión
-        # ----------------------------------------------------
         link_nivel20 = self.datos["link"].strip()
         if link_nivel20.startswith("http"):
             try:
@@ -161,9 +159,7 @@ class ConfirmacionRegistro(discord.ui.View):
         self.stop()
 
 
-# =========================================================================
 # 🏛️ COG REESTRUCTURADO: MOTOR DE ESCUCHA PASIVA POR EVENTO GLOBAL
-# =========================================================================
 
 class AdmisionCog(commands.Cog):
     def __init__(self, bot):
