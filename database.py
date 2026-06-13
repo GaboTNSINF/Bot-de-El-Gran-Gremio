@@ -345,13 +345,19 @@ async def obtener_personaje(user_id: int):
         ) as cursor:
             return await cursor.fetchone()
 
-async def registrar_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str):
-    async with get_db() as db:
-
-            await db.execute("""
-                INSERT INTO aventureros (user_id, char_name, char_race, char_class, char_age, char_height, sheet_link, nivel, sesiones_jugadas)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)
-            """, (user_id, name, race, char_class, age, height, link))
+async def registrar_personaje(user_id: int, name: str, race: str, char_class: str, age: int, height: str, link: str) -> bool:
+    try:
+        async with get_db() as db:
+            async with transaccion_gremial(db):
+                await db.execute("""
+                    INSERT INTO aventureros (user_id, char_name, char_race, char_class, char_age, char_height, sheet_link, nivel, sesiones_jugadas)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)
+                """, (user_id, name, race, char_class, age, height, link))
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 async def eliminar_personaje(user_id: int) -> bool:
     try:
@@ -755,17 +761,15 @@ async def migrar_catalogo_inicial(catalogo_base: dict):
                             VALUES (?, ?, ?, ?, ?)
                         """, (item["nombre"], item["precio"], item["costo_pc"], categoria, item["desc"]))
 
-async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: str = 'tienda'):
+async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: str = 'tienda') -> bool:
     item_id = producto_nombre.lower().replace(" ", "_")
     try:
         async with get_db() as db:
-
             async with transaccion_gremial(db):
-
                 await db.execute("INSERT OR IGNORE INTO personajes_estados (user_id) VALUES (?)", (user_id,))
 
                 if origen == 'nivel20':
-                    return
+                    raise TransactionLogicError()
 
                 await db.execute(
                     "INSERT OR IGNORE INTO inventario_materiales (user_id, item_id, cantidad) VALUES (?, ?, 0)",
@@ -775,8 +779,11 @@ async def agregar_item_inventario(user_id: int, producto_nombre: str, origen: st
                     "UPDATE inventario_materiales SET cantidad = cantidad + 1 WHERE user_id = ? AND item_id = ?",
                     (user_id, item_id)
                 )
-    except Exception as e:
-        print(f"Error agregando item: {e}")
+        return True
+    except TransactionLogicError:
+        return False
+    except Exception:
+        return False
 
 async def obtener_inventario_usuario(user_id: int):
     async with get_db() as db:
