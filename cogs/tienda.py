@@ -2,10 +2,9 @@
 
 import discord
 from discord.ext import commands
-import json
 
 import database
-from config import ROLES_EDICION_MATRICULA
+from config import ROLES_EDICION_MATRICULA, CANAL_LOGS_ID
 
 class SelectCategoriaTienda(discord.ui.Select):
     """Menú desplegable para navegar el catálogo dinámico desde la BD."""
@@ -23,14 +22,14 @@ class SelectCategoriaTienda(discord.ui.Select):
         super().__init__(placeholder="Abre el catálogo gremial...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        # BLINDAJE: Defer instantáneo para que la interacción no caduque.
+        # BLINDAJE DE RED: Defer instantáneo para prevenir la caducidad del token (3000ms TTL).
         await interaction.response.defer(ephemeral=True)
 
         categoria_elegida = self.values[0]
-        catalogo_completo = await database.obtener_catalogo()
 
-        # Filtramos los items de la base de datos por la categoría seleccionada
-        items = [item for item in catalogo_completo if item["categoria"].lower() == categoria_elegida.lower()]
+        # Aislamiento de Red: Extracción microscópica indexada O(log N) directa desde el disco.
+        # Erradica la deserialización total en memoria y la lista de comprensión lineal de Python.
+        items = await database.obtener_productos_por_categoria(categoria_elegida)
 
         embed = discord.Embed(
             title=f"🏪 CATÁLOGO GREMIAL: {categoria_elegida.upper()}",
@@ -61,13 +60,12 @@ class TiendaCog(commands.Cog):
 
     @commands.slash_command(name="tienda", description="Abre el catálogo interactivo del Gremio de forma privada.")
     async def tienda(self, ctx: discord.ApplicationContext):
-        # de rol donde los demás están escribiendo.
+        # Diseño UX: Respuesta efímera obligatoria para evitar la contaminación visual del canal de rol activo.
         catalogo = await database.obtener_catalogo()
         if not catalogo:
             await ctx.respond("❌ **La tienda está vacía actualmente.** Los administradores aún no han añadido productos.", ephemeral=True)
             return
 
-        # Extraemos las categorías únicas disponibles en el catálogo
         categorias = list(set(item["categoria"] for item in catalogo))
 
         embed = discord.Embed(
@@ -81,14 +79,8 @@ class TiendaCog(commands.Cog):
     async def comprar(self, ctx: discord.ApplicationContext, objeto: discord.Option(str, "Escribe el nombre del objeto tal cual sale en la /tienda")):
         await ctx.response.defer(ephemeral=True)
 
-        objeto_buscado = objeto.lower().strip()
-        catalogo = await database.obtener_catalogo()
-
-        item_encontrado = None
-        for item in catalogo:
-            if item["nombre"].lower() == objeto_buscado:
-                item_encontrado = item
-                break
+        # Delegación O(1) de resolución lógica al motor de persistencia relacional
+        item_encontrado = await database.obtener_producto_por_nombre(objeto)
 
         if not item_encontrado:
             await ctx.followup.send(f"❌ **El objeto `{objeto}` no existe en el catálogo.** Escribe `/tienda` para revisar los nombres exactos.", ephemeral=True)
@@ -96,7 +88,7 @@ class TiendaCog(commands.Cog):
 
         costo_cobre = item_encontrado["costo_pc"]
 
-        # Delegate business logic to atomic DB function
+        # Aislamiento de Capa: Delegación a persistencia atómica pura para transferencia unificada de inventario y saldos.
         exito = await database.procesar_compra_gremial(ctx.user.id, item_encontrado["nombre"], costo_cobre)
 
         if not exito:
@@ -111,13 +103,19 @@ class TiendaCog(commands.Cog):
         embed_recibo.add_field(name="🎒 Objeto Adquirido", value=f"**{item_encontrado['nombre']}**", inline=True)
         embed_recibo.add_field(name="💰 Importe Pagado", value=f"`{item_encontrado['precio_str']}`", inline=True)
         embed_recibo.set_footer(text="El objeto ha sido añadido a tu inventario. ¡Usa /inventario para verlo!")
-
         await ctx.followup.send(embed=embed_recibo, ephemeral=True)
 
-        from config import CANAL_LOGS_ID
-        log_channel = self.bot.get_channel(CANAL_LOGS_ID)
-        if log_channel:
+        # Resolución Defensiva del Audit Trail (Caché vs. API Rest)
+        try:
+            log_channel = self.bot.get_channel(CANAL_LOGS_ID)
+            if log_channel is None:
+                log_channel = await self.bot.fetch_channel(CANAL_LOGS_ID)
+
             await log_channel.send(f"💸 [TIENDA] {ctx.user.mention} compró `{item_encontrado['nombre']}` por {item_encontrado['precio_str']}.")
+        except Exception as e:
+            # Fallo crítico de red o permisos: propagamos la alerta internamente.
+            import logging
+            logging.error(f"Fallo de Auditoría Operacional en Tienda: {e}")
 
     @commands.slash_command(name="agregar_producto", description="[ADMIN] Añade un nuevo producto al catálogo de la tienda.")
     async def agregar_producto(self, ctx: discord.ApplicationContext,
@@ -127,7 +125,7 @@ class TiendaCog(commands.Cog):
                                categoria: discord.Option(str, "Categoría", choices=["Armas", "Armaduras", "Consumibles", "Magia", "Otro"]),
                                descripcion: discord.Option(str, "Breve descripción del item")):
 
-        # BLINDAJE: Verificación de permisos
+        # BLINDAJE DE JERARQUÍA: Validación estricta contra manipulaciones de matrícula.
         if not any(role.id in ROLES_EDICION_MATRICULA for role in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado:** Solo la Alta Dirección puede modificar el catálogo de la tienda.", ephemeral=True)
             return
@@ -151,20 +149,19 @@ class TiendaCog(commands.Cog):
             precio_str += "pc"
 
         # Revisar si ya existe
-        catalogo = await database.obtener_catalogo()
-        for item in catalogo:
-            if item["nombre"].lower() == nombre.lower():
-                await ctx.followup.send(f"❌ **Error:** El producto `{nombre}` ya existe en la tienda.", ephemeral=True)
-                return
+        # Aislamiento de Red y RAM: Delegación escalar O(log N) para unicidad de nombres.
+        # Elimina completamente el escaneo de tabla total y el bucle for sobre la RAM de Python.
+        exito = await database.agregar_producto_db(nombre, precio_str, costo_pc, categoria, descripcion)
 
-        # Insertar a la base de datos
-        await database.agregar_producto_db(nombre, precio_str, costo_pc, categoria, descripcion)
+        if not exito:
+            await ctx.followup.send(f"❌ **Error:** El producto `{nombre}` ya existe en la tienda.", ephemeral=True)
+            return
 
         await ctx.followup.send(f"✅ **Producto Añadido:** `{nombre}` se agregó a la categoría **{categoria}** por **{precio_str}**.", ephemeral=True)
 
     @commands.slash_command(name="eliminar_producto", description="[ADMIN] Elimina un producto del catálogo de la tienda.")
     async def eliminar_producto(self, ctx: discord.ApplicationContext, nombre: discord.Option(str, "Nombre exacto del producto a eliminar")):
-        # BLINDAJE: Verificación de permisos
+        # BLINDAJE DE JERARQUÍA: Validación estricta contra manipulaciones de matrícula.
         if not any(role.id in ROLES_EDICION_MATRICULA for role in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado:** Solo la Alta Dirección puede modificar el catálogo de la tienda.", ephemeral=True)
             return

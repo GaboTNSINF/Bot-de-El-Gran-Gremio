@@ -147,9 +147,7 @@ class TabernaCog(commands.Cog):
         await ctx.followup.send(embed=embed, view=BotonesCubilete())
 
 
-    # =========================================================================
     # 🃏 SECCIÓN: BLACKJACK / VEINTIUNA
-    # =========================================================================
 
     @commands.slash_command(name="blackjack", description="Juega al clásico 21 contra el Croupier del casino.")
     async def blackjack(

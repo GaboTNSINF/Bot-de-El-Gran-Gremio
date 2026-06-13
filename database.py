@@ -130,6 +130,8 @@ async def init_db():
                     )
                 ''')
 
+                await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tienda_productos_nombre ON tienda_productos (nombre COLLATE NOCASE);")
+
                 await db.execute('''CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         folio INTEGER NOT NULL,
@@ -321,6 +323,28 @@ async def init_db():
             print("🔧 [MIGRACIÓN] Esquema V3 y porteos idempotentes optimizados consolidados.")
 
 # --- CONSULTAS OPTIMIZADAS ---
+
+async def obtener_categorias_unicas():
+    async with get_db() as db:
+        async with db.execute("SELECT DISTINCT categoria FROM tienda_productos") as cursor:
+            return [row["categoria"] for row in await cursor.fetchall()]
+
+async def obtener_productos_por_categoria(categoria: str):
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT nombre, precio_str, descripcion FROM tienda_productos WHERE categoria = ? COLLATE NOCASE",
+            (categoria.strip(),)
+        ) as cursor:
+            return await cursor.fetchall()
+
+async def obtener_producto_por_nombre(nombre_producto: str):
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT nombre, precio_str, costo_pc, categoria, descripcion FROM tienda_productos WHERE nombre = ? COLLATE NOCASE",
+            (nombre_producto.strip(),)
+        ) as cursor:
+            return await cursor.fetchone()
+
 
 async def obtener_personaje(user_id: int):
     async with get_db() as db:
@@ -744,6 +768,11 @@ async def agregar_producto_db(nombre: str, precio_str: str, costo_pc: int, categ
         return True
     except TransactionLogicError:
         return False
+    except aiosqlite.IntegrityError as e:
+        error_msg = str(e).lower()
+        if "idx_tienda_productos_nombre" in error_msg and ("unique" in error_msg or "primary key" in error_msg):
+            return False
+        raise
     except Exception:
         raise
 
