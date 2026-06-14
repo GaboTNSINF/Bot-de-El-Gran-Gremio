@@ -37,14 +37,81 @@ class SelectCategoriaTienda(discord.ui.Select):
             color=discord.Color.gold()
         )
 
-        for item in items:
-            embed.add_field(
-                name=f"🛒 {item['nombre']} — **{item['precio_str']}**",
-                value=f"*{item['descripcion']}*\n(Comprar: `/comprar \"{item['nombre']}\"`)",
-                inline=False
-            )
+        LIMITE_MASA_SEGURA = 5800
 
-        embed.set_footer(text="Anota el nombre exacto del objeto para usar el comando /comprar")
+        # String constante de advertencia post-bucle
+        TEXTO_ADVERTENCIA = "\n\n⚠️ **ADVERTENCIA:** *Existen más productos en esta categoría, pero la lista ha sido truncada por límites de información. Contacta a un administrador.*"
+
+        # Reserva Estática Aritmética: Iniciamos la masa pre-calculando el coste de todos los metadatos fijos
+        # y reservando por adelantado el costo de la advertencia, garantizando que el bucle deje el espacio exacto.
+        texto_footer = "Anota el nombre exacto del objeto para usar el comando /comprar"
+        masa_acumulada = len(embed.title) + len(embed.description) + len(TEXTO_ADVERTENCIA) + len(texto_footer)
+
+        campos_procesados = 0
+        alerta_disparada = False
+
+        for item in items:
+            # Control de Límite de Arrays de la API (Max 25 Fields)
+            if campos_procesados >= 25:
+                alerta_disparada = True
+                break
+
+            nombre_original = item['nombre']
+            precio_str = item['precio_str']
+
+            # Restricción Topológica de Pasarela: Límite de Slash Commands de Discord
+            # Cortocircuito absoluto si el nombre supera los 100 caracteres.
+            if len(nombre_original) > 100:
+                alerta_disparada = True
+                continue
+
+            # Ensamblaje protegido: 'nombre_original' está matemáticamente garantizado de ser <= 100.
+            # Se erradica el bloque if len > 200 (código muerto).
+            nombre_campo = f"🛒 {nombre_original} — **{precio_str}**"
+
+            # Validación Predictiva Dinámica para evitar ValueError (> 256) por culpa de 'precio_str'
+            if len(nombre_campo) > 256:
+                alerta_disparada = True
+                continue
+
+            # 2. Validación Predictiva Dinámica y Truncamiento Unitario de 'value' (Max 1024)
+            # Libre de sabotaje léxico (sin comillas tipográficas)
+            instruccion_compra = f"\n(Comprar: `/comprar {nombre_original}`)"
+            descripcion_base = item['descripcion']
+
+            # Cálculo dinámico del espacio remanente, descontando formato
+            margen_seguro = 1024 - len(instruccion_compra) - 2
+
+            # Sub-Operatividad
+            if margen_seguro < 10:
+                alerta_disparada = True
+                continue
+
+            if len(descripcion_base) > margen_seguro:
+                descripcion_base = descripcion_base[:(margen_seguro - 3)] + "..."
+
+            valor_campo = f"*{descripcion_base}*{instruccion_compra}"
+
+            # 3. Evaluación Predictiva del Payload Global
+            costo_proyectado = len(nombre_campo) + len(valor_campo)
+
+            # El límite de masa evalúa contra una masa artificialmente inflada por la Reserva Estática.
+            if masa_acumulada + costo_proyectado > LIMITE_MASA_SEGURA:
+                alerta_disparada = True
+                break
+
+            embed.add_field(name=nombre_campo, value=valor_campo, inline=False)
+            masa_acumulada += costo_proyectado
+            campos_procesados += 1
+
+        embed.set_footer(text=texto_footer)
+
+        if alerta_disparada:
+            # Telemetría local y acoplamiento inofensivo de advertencia pre-costeada
+            import logging
+            logging.warning(f"[UI RATE LIMIT EVADED] Truncamiento activado en tienda para la categoría '{categoria_elegida}'. Se omitieron registros masivos o malformados.")
+            embed.description += TEXTO_ADVERTENCIA
+
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
