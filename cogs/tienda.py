@@ -75,8 +75,11 @@ class SelectCategoriaTienda(discord.ui.Select):
                 continue
 
             # 2. Validación Predictiva Dinámica y Truncamiento Unitario de 'value' (Max 1024)
-            # Libre de sabotaje léxico (sin comillas tipográficas)
-            instruccion_compra = f"\n(Comprar: `/comprar {nombre_original}`)"
+            # Sanitización de caracteres de control Markdown (backticks) para prevenir inyección visual
+            nombre_limpio = nombre_original.replace("`", "'")
+
+            # Libre de sabotaje léxico (sin comillas tipográficas) y sanitizado visualmente
+            instruccion_compra = f"\n(Comprar: `/comprar {nombre_limpio}`)"
             descripcion_base = item['descripcion']
 
             # Cálculo dinámico del espacio remanente, descontando formato
