@@ -12,7 +12,7 @@ class TransactionLogicError(Exception):
 async def get_db():
     async with aiosqlite.connect(DB_PATH, isolation_level=None) as db:
         await db.execute("PRAGMA foreign_keys = ON;")
-        await db.execute("PRAGMA journal_mode = WAL;")
+        # No se declara PRAGMA journal_mode = WAL; aquí para evitar I/O redundante por conexión efímera.
         await db.execute("PRAGMA busy_timeout = 5000;")
         db.row_factory = aiosqlite.Row
         yield db
@@ -33,6 +33,10 @@ async def transaccion_gremial(db: aiosqlite.Connection):
 
 async def init_db():
     async with get_db() as db:
+        # Aislamiento de Red: Activación de WAL de forma estática durante el arranque (On-Boot)
+        # Previene saturación de I/O en conexiones efímeras
+        await db.execute("PRAGMA journal_mode = WAL;")
+
         async with db.execute("PRAGMA user_version") as cursor:
             version_db = (await cursor.fetchone())[0]
 
@@ -323,17 +327,38 @@ async def init_db():
             await db.execute("PRAGMA user_version = 1")
             print("🔧 [MIGRACIÓN] Esquema V3 y porteos idempotentes optimizados consolidados.")
 
+        if version_db < 2:
+            async with transaccion_gremial(db):
+                # Índice de andamiaje transitorio (O(log N)) para la purga
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_temp_purga_nombre ON tienda_productos(nombre COLLATE NOCASE);")
+
+                # Limpieza por colisiones previas: Eliminamos duplicados antes de crear índices únicos
+                await db.execute('''
+                    DELETE FROM tienda_productos WHERE id NOT IN (
+                        SELECT MIN(id) FROM tienda_productos GROUP BY nombre COLLATE NOCASE
+                    )
+                ''')
+
+                await db.execute("DROP INDEX IF EXISTS idx_temp_purga_nombre;")
+
+                # Restauración de Índices Vitales
+                await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tienda_productos_nombre ON tienda_productos (nombre COLLATE NOCASE);")
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_tienda_productos_categoria ON tienda_productos (categoria COLLATE NOCASE);")
+
+            await db.execute("PRAGMA user_version = 2")
+            print("🔧 [MIGRACIÓN V2] Saneamiento de índices B-Tree completado.")
+
 # --- CONSULTAS OPTIMIZADAS ---
 
 async def obtener_categorias_unicas():
     async with get_db() as db:
-        async with db.execute("SELECT DISTINCT categoria FROM tienda_productos") as cursor:
+        async with db.execute("SELECT DISTINCT categoria COLLATE NOCASE as categoria FROM tienda_productos") as cursor:
             return [row["categoria"] for row in await cursor.fetchall()]
 
 async def obtener_productos_por_categoria(categoria: str):
     async with get_db() as db:
         async with db.execute(
-            "SELECT nombre, precio_str, descripcion FROM tienda_productos WHERE categoria = ? COLLATE NOCASE",
+            "SELECT nombre, precio_str, descripcion FROM tienda_productos WHERE (categoria COLLATE NOCASE) = ?",
             (categoria.strip(),)
         ) as cursor:
             return await cursor.fetchall()
