@@ -33,15 +33,13 @@ async def transaccion_gremial(db: aiosqlite.Connection):
 
 async def init_db():
     async with get_db() as db:
-        # Aislamiento de Red: Activación de WAL de forma estática durante el arranque (On-Boot)
-        # Previene saturación de I/O en conexiones efímeras
-        await db.execute("PRAGMA journal_mode = WAL;")
-
         async with db.execute("PRAGMA user_version") as cursor:
             version_db = (await cursor.fetchone())[0]
 
         # Cortocircuito estructural O(1) de I/O
         if version_db < 1:
+            # Aislamiento de Red: Activación de WAL de forma estática durante la inicialización
+            await db.execute("PRAGMA journal_mode = WAL;")
             async with transaccion_gremial(db):
                 await db.execute('''
                     CREATE TABLE IF NOT EXISTS aventureros (
@@ -581,39 +579,41 @@ async def obtener_personal_division(division: str):
             return await cursor.fetchall()
 
 async def obtener_candidatos_compatibles_dm(dm_id: int, limite_jugadores: int):
-    async with get_db() as db:
-        await db.execute("BEGIN DEFERRED TRANSACTION;")
-        try:
-            async with db.execute(
-                "SELECT hora_inicio_utc, hora_fin_utc FROM matchmaking WHERE user_id = ? AND rol_busqueda = 'dm'",
-                (dm_id,)
-            ) as cursor:
-                dm_datos = await cursor.fetchone()
-                if not dm_datos:
-                    return []
+    try:
+        async with get_db() as db:
+            async with transaccion_gremial(db):
+                async with db.execute(
+                    "SELECT hora_inicio_utc, hora_fin_utc FROM matchmaking WHERE user_id = ? AND rol_busqueda = 'dm'",
+                    (dm_id,)
+                ) as cursor:
+                    dm_datos = await cursor.fetchone()
+                    if not dm_datos:
+                        return []
 
-            dm_ini = dm_datos["hora_inicio_utc"]
-            dm_fin = dm_datos["hora_fin_utc"]
+                dm_ini = dm_datos["hora_inicio_utc"]
+                dm_fin = dm_datos["hora_fin_utc"]
 
-            if dm_fin <= dm_ini:
-                dm_fin += 1440
+                if dm_fin <= dm_ini:
+                    dm_fin += 1440
 
-            query = '''
-                SELECT m.user_id, a.nivel, m.hora_inicio_utc, m.hora_fin_utc
-                FROM matchmaking m
-                JOIN aventureros a ON m.user_id = a.user_id
-                WHERE m.rol_busqueda = 'jugador'
-                  AND (
-                      MIN(CASE WHEN m.hora_fin_utc <= m.hora_inicio_utc THEN m.hora_fin_utc + 1440 ELSE m.hora_fin_utc END, ?)
-                      -
-                      MAX(m.hora_inicio_utc, ?)
-                  ) >= 180
-                LIMIT ?
-            '''
-            async with db.execute(query, (dm_fin, dm_ini, limite_jugadores)) as cursor:
-                return await cursor.fetchall()
-        finally:
-            await db.execute("COMMIT;")
+                query = '''
+                    SELECT m.user_id, a.nivel, m.hora_inicio_utc, m.hora_fin_utc
+                    FROM matchmaking m
+                    JOIN aventureros a ON m.user_id = a.user_id
+                    WHERE m.rol_busqueda = 'jugador'
+                      AND (
+                          MIN(CASE WHEN m.hora_fin_utc <= m.hora_inicio_utc THEN m.hora_fin_utc + 1440 ELSE m.hora_fin_utc END, ?)
+                          -
+                          MAX(m.hora_inicio_utc, ?)
+                      ) >= 180
+                    LIMIT ?
+                '''
+                async with db.execute(query, (dm_fin, dm_ini, limite_jugadores)) as cursor:
+                    return await cursor.fetchall()
+    except TransactionLogicError:
+        return []
+    except Exception:
+        raise
 
 # --- INFRAESTRUCTURA BANCARIA CONTROLADA (BLINDAJE DE CONCURRENCIA SANEADO) ---
 
