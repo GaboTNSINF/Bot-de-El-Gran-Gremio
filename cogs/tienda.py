@@ -61,12 +61,12 @@ class TiendaCog(commands.Cog):
     @commands.slash_command(name="tienda", description="Abre el catálogo interactivo del Gremio de forma privada.")
     async def tienda(self, ctx: discord.ApplicationContext):
         # Diseño UX: Respuesta efímera obligatoria para evitar la contaminación visual del canal de rol activo.
-        catalogo = await database.obtener_catalogo()
-        if not catalogo:
+        # Agregación Relacional Nativa: Extracción de huella de memoria optimizada
+        categorias = await database.obtener_categorias_unicas()
+
+        if not categorias:
             await ctx.respond("❌ **La tienda está vacía actualmente.** Los administradores aún no han añadido productos.", ephemeral=True)
             return
-
-        categorias = list(set(item["categoria"] for item in catalogo))
 
         embed = discord.Embed(
             title="🏪 BIENVENIDO A LA TIENDA DEL GREMIO",

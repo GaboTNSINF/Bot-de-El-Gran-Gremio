@@ -131,6 +131,7 @@ async def init_db():
                 ''')
 
                 await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tienda_productos_nombre ON tienda_productos (nombre COLLATE NOCASE);")
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_tienda_productos_categoria ON tienda_productos (categoria COLLATE NOCASE);")
 
                 await db.execute('''CREATE TABLE IF NOT EXISTS auditoria_sesiones_fallidas (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
