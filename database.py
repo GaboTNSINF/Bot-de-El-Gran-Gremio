@@ -75,6 +75,7 @@ async def init_db():
                         hora_fin_utc INTEGER NOT NULL
                     )
                 ''')
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_matchmaking_rol ON matchmaking (rol_busqueda)")
 
                 await db.execute('''
                     CREATE TABLE IF NOT EXISTS registro_dms (
@@ -593,22 +594,38 @@ async def obtener_candidatos_compatibles_dm(dm_id: int, limite_jugadores: int):
                 dm_ini = dm_datos["hora_inicio_utc"]
                 dm_fin = dm_datos["hora_fin_utc"]
 
-                if dm_fin <= dm_ini:
-                    dm_fin += 1440
+                # Vectorización en Python de los segmentos lineales disjuntos del DM
+                if dm_ini < dm_fin:
+                    dm1_s, dm1_e = dm_ini, dm_fin
+                    dm2_s, dm2_e = 0, 0
+                else:
+                    dm1_s, dm1_e = dm_ini, 1440
+                    dm2_s, dm2_e = 0, dm_fin
 
+                # Matriz distributiva de intersección O(1) en SQLite libre de falsos negativos cíclicos
                 query = '''
                     SELECT m.user_id, a.nivel, m.hora_inicio_utc, m.hora_fin_utc
                     FROM matchmaking m
                     JOIN aventureros a ON m.user_id = a.user_id
                     WHERE m.rol_busqueda = 'jugador'
                       AND (
-                          MIN(CASE WHEN m.hora_fin_utc <= m.hora_inicio_utc THEN m.hora_fin_utc + 1440 ELSE m.hora_fin_utc END, ?)
-                          -
-                          MAX(m.hora_inicio_utc, ?)
+                          max(0, min(?, CASE WHEN m.hora_inicio_utc < m.hora_fin_utc THEN m.hora_fin_utc ELSE 1440 END) - max(?, m.hora_inicio_utc)) +
+                          max(0, min(?, CASE WHEN m.hora_inicio_utc < m.hora_fin_utc THEN 0 ELSE m.hora_fin_utc END) - max(?, 0)) +
+                          max(0, min(?, CASE WHEN m.hora_inicio_utc < m.hora_fin_utc THEN m.hora_fin_utc ELSE 1440 END) - max(?, m.hora_inicio_utc)) +
+                          max(0, min(?, CASE WHEN m.hora_inicio_utc < m.hora_fin_utc THEN 0 ELSE m.hora_fin_utc END) - max(?, 0))
                       ) >= 180
                     LIMIT ?
                 '''
-                async with db.execute(query, (dm_fin, dm_ini, limite_jugadores)) as cursor:
+
+                parametros = (
+                    dm1_e, dm1_s,  # Par 1: Intersect(DM1, P1)
+                    dm1_e, dm1_s,  # Par 2: Intersect(DM1, P2)
+                    dm2_e, dm2_s,  # Par 3: Intersect(DM2, P1)
+                    dm2_e, dm2_s,  # Par 4: Intersect(DM2, P2)
+                    limite_jugadores
+                )
+
+                async with db.execute(query, parametros) as cursor:
                     return await cursor.fetchall()
     except TransactionLogicError:
         return []
