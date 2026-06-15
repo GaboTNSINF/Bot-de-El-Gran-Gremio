@@ -75,7 +75,6 @@ async def init_db():
                         hora_fin_utc INTEGER NOT NULL
                     )
                 ''')
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_matchmaking_rol ON matchmaking (rol_busqueda)")
 
                 await db.execute('''
                     CREATE TABLE IF NOT EXISTS registro_dms (
@@ -346,6 +345,19 @@ async def init_db():
 
             await db.execute("PRAGMA user_version = 2")
             print("🔧 [MIGRACIÓN V2] Saneamiento de índices B-Tree completado.")
+
+        if version_db < 3:
+            async with transaccion_gremial(db):
+                # Índice de Cobertura Compuesto (Index-Only Scan)
+                # Diseñado para maximizar la selectividad inicial y nutrir la Matriz Aritmética
+                # en obtener_candidatos_compatibles_dm sin requerir acceso a las páginas de datos de la tabla.
+                await db.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_matchmaking_cobertura
+                    ON matchmaking (rol_busqueda, hora_inicio_utc, hora_fin_utc, user_id);
+                ''')
+
+            await db.execute("PRAGMA user_version = 3")
+            print("🔧 [MIGRACIÓN V3] Índice de Cobertura para Matchmaking consolidado en el B-Tree.")
 
 # --- CONSULTAS OPTIMIZADAS ---
 
