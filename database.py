@@ -363,7 +363,7 @@ async def init_db():
 
 async def obtener_categorias_unicas():
     async with get_db() as db:
-        async with db.execute("SELECT DISTINCT categoria COLLATE NOCASE as categoria FROM tienda_productos") as cursor:
+        async with db.execute("SELECT categoria FROM tienda_productos GROUP BY categoria COLLATE NOCASE") as cursor:
             return [row["categoria"] for row in await cursor.fetchall()]
 
 async def obtener_productos_por_categoria(categoria: str):
