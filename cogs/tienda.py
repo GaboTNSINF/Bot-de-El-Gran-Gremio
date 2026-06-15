@@ -39,55 +39,67 @@ class SelectCategoriaTienda(discord.ui.Select):
 
         LIMITE_MASA_SEGURA = 5800
 
-        # String constante de advertencia post-bucle
-        TEXTO_ADVERTENCIA = "\n\n⚠️ **ADVERTENCIA:** *Existen más productos en esta categoría, pero la lista ha sido truncada por límites de información. Contacta a un administrador.*"
+        # String constante de advertencias post-bucle
+        TEXTO_ADVERTENCIA_TRUNC = "\n\n⚠️ **ADVERTENCIA:** *Existen más productos en esta categoría, pero la lista ha sido truncada por límites de información. Contacta a un administrador.*"
+        TEXTO_ADVERTENCIA_MALF = "\n\n⚠️ **ADVERTENCIA:** *Algunos productos fueron ocultados por contener nombres inválidos. Contacta a un administrador.*"
 
-        # Reserva Estática Aritmética: Iniciamos la masa pre-calculando el coste de todos los metadatos fijos
-        # y reservando por adelantado el costo de la advertencia, garantizando que el bucle deje el espacio exacto.
+        # Inicialización pura: Excluye el costo hipotético de las advertencias.
         texto_footer = "Anota el nombre exacto del objeto para usar el comando /comprar"
-        masa_acumulada = len(embed.title) + len(embed.description) + len(TEXTO_ADVERTENCIA) + len(texto_footer)
+        masa_acumulada = len(embed.title) + len(embed.description) + len(texto_footer)
 
         campos_procesados = 0
-        alerta_disparada = False
+        alerta_truncamiento = False
+        alerta_malformado = False
 
         for item in items:
-            # Control de Límite de Arrays de la API (Max 25 Fields)
             if campos_procesados >= 25:
-                alerta_disparada = True
+                alerta_truncamiento = True
                 break
 
             nombre_original = item['nombre']
             precio_str = item['precio_str']
 
-            # Restricción Topológica de Pasarela: Límite de Slash Commands de Discord
-            # Cortocircuito absoluto si el nombre supera los 100 caracteres.
+            # Evaluación de Límite Topológico (> 100)
             if len(nombre_original) > 100:
-                alerta_disparada = True
+                if not alerta_malformado:
+                    # Evaluación Retroactiva: ¿Soporta la masa el peso de ambas advertencias?
+                    limite_estricto = LIMITE_MASA_SEGURA - len(TEXTO_ADVERTENCIA_TRUNC) - len(TEXTO_ADVERTENCIA_MALF)
+                    if masa_acumulada > limite_estricto:
+                        # Cortocircuito Asimétrico: La masa actual solo soporta el aviso de truncamiento.
+                        alerta_truncamiento = True
+                        break
+                    alerta_malformado = True
                 continue
 
-            # Ensamblaje protegido: 'nombre_original' está matemáticamente garantizado de ser <= 100.
-            # Se erradica el bloque if len > 200 (código muerto).
             nombre_campo = f"🛒 {nombre_original} — **{precio_str}**"
 
-            # Validación Predictiva Dinámica para evitar ValueError (> 256) por culpa de 'precio_str'
             if len(nombre_campo) > 256:
-                alerta_disparada = True
+                if not alerta_malformado:
+                    # Evaluación Retroactiva
+                    limite_estricto = LIMITE_MASA_SEGURA - len(TEXTO_ADVERTENCIA_TRUNC) - len(TEXTO_ADVERTENCIA_MALF)
+                    if masa_acumulada > limite_estricto:
+                        # Cortocircuito Asimétrico
+                        alerta_truncamiento = True
+                        break
+                    alerta_malformado = True
                 continue
 
-            # 2. Validación Predictiva Dinámica y Truncamiento Unitario de 'value' (Max 1024)
-            # Sanitización de caracteres de control Markdown (backticks) para prevenir inyección visual
-            nombre_limpio = nombre_original.replace("`", "'")
-
-            # Libre de sabotaje léxico (sin comillas tipográficas) y sanitizado visualmente
-            instruccion_compra = f"\n(Comprar: `/comprar {nombre_limpio}`)"
+            # Inmunidad Sintáctica y Correspondencia Limpia (Sin delimitadores de estilo frágiles)
+            # Se presenta en un bloque de cita plano nativo para aislar caracteres conflictivos sin alterar portapapeles.
+            instruccion_compra = f"\n> Comprar: /comprar {nombre_original}"
             descripcion_base = item['descripcion']
 
-            # Cálculo dinámico del espacio remanente, descontando formato
             margen_seguro = 1024 - len(instruccion_compra) - 2
 
-            # Sub-Operatividad
             if margen_seguro < 10:
-                alerta_disparada = True
+                if not alerta_malformado:
+                    # Evaluación Retroactiva
+                    limite_estricto = LIMITE_MASA_SEGURA - len(TEXTO_ADVERTENCIA_TRUNC) - len(TEXTO_ADVERTENCIA_MALF)
+                    if masa_acumulada > limite_estricto:
+                        # Cortocircuito Asimétrico
+                        alerta_truncamiento = True
+                        break
+                    alerta_malformado = True
                 continue
 
             if len(descripcion_base) > margen_seguro:
@@ -95,12 +107,17 @@ class SelectCategoriaTienda(discord.ui.Select):
 
             valor_campo = f"*{descripcion_base}*{instruccion_compra}"
 
-            # 3. Evaluación Predictiva del Payload Global
             costo_proyectado = len(nombre_campo) + len(valor_campo)
 
-            # El límite de masa evalúa contra una masa artificialmente inflada por la Reserva Estática.
-            if masa_acumulada + costo_proyectado > LIMITE_MASA_SEGURA:
-                alerta_disparada = True
+            # Evaluación Dinámica y Reactiva:
+            # Deducimos el costo ineludible de TEXTO_ADVERTENCIA_MALF si la bandera está activa.
+            # Virtualmente reservamos espacio para TEXTO_ADVERTENCIA_TRUNC ante desbordamientos inminentes.
+            limite_dinamico = LIMITE_MASA_SEGURA - len(TEXTO_ADVERTENCIA_TRUNC)
+            if alerta_malformado:
+                limite_dinamico -= len(TEXTO_ADVERTENCIA_MALF)
+
+            if masa_acumulada + costo_proyectado > limite_dinamico:
+                alerta_truncamiento = True
                 break
 
             embed.add_field(name=nombre_campo, value=valor_campo, inline=False)
@@ -109,11 +126,20 @@ class SelectCategoriaTienda(discord.ui.Select):
 
         embed.set_footer(text=texto_footer)
 
-        if alerta_disparada:
-            # Telemetría local y acoplamiento inofensivo de advertencia pre-costeada
+        # Desacople Lógico: Informar la verdad absoluta al usuario sin enmascaramiento (sin uso de elif)
+        if alerta_truncamiento:
+            embed.description += TEXTO_ADVERTENCIA_TRUNC
+
+        if alerta_malformado:
+            embed.description += TEXTO_ADVERTENCIA_MALF
+
+        if alerta_truncamiento or alerta_malformado:
             import logging
-            logging.warning(f"[UI RATE LIMIT EVADED] Truncamiento activado en tienda para la categoría '{categoria_elegida}'. Se omitieron registros masivos o malformados.")
-            embed.description += TEXTO_ADVERTENCIA
+            motivo_log = []
+            if alerta_truncamiento: motivo_log.append("Límites Volumétricos (Truncamiento)")
+            if alerta_malformado: motivo_log.append("Datos Malformados/Saturados")
+
+            logging.warning(f"[UI RATE LIMIT EVADED] Filtrado activado en tienda para la categoría '{categoria_elegida}'. Motivos: {' y '.join(motivo_log)}")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
