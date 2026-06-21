@@ -32,7 +32,7 @@ class SelectLadder(discord.ui.Select):
                     embed_actualizado.description += f"**#{i}** | <@{uid}> (`{name}`) — **Nivel {nivel}** ({sesiones} misiones cumplidas)\n"
         else:
             embed_actualizado.title = "🔮 CONCILIO DE NARRADORES: CLASIFICACIÓN DE SKALDS"
-            embed_actualizado.description = "Registro maestro de los 10 directores con mayor volumen de arbitraje:\n\n"
+            embed_actualizado.description = "Registro maestro de los 10 Skalds con mayor volumen de arbitraje:\n\n"
             datos = await database.obtener_ladder_dms()
             if not datos:
                 embed_actualizado.description += "*No se registran Skalds en el registro operativo.*"

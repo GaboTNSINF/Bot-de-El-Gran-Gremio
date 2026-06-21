@@ -273,7 +273,7 @@ class MatchmakingCog(commands.Cog):
                         overwrites[rol] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
 
                 nuevo_canal = await guild.create_text_channel(
-                    name=f"⚔-mesa-dm-{dm_user.name.lower() if dm_user else 'anon'}"[:100],
+                    name=f"⚔-mesa-skald-{dm_user.name.lower() if dm_user else 'anon'}"[:100],
                     category=categoria,
                     overwrites=overwrites
                 )
