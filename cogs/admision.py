@@ -12,8 +12,8 @@ class SelectLadder(discord.ui.Select):
     """Menú de selección interactivo para conmutar las pestañas del Ladder."""
     def __init__(self):
         options = [
-            discord.SelectOption(label="Clasificación: Aventureros", description="Top 10 héroes del reino por nivel de personaje.", emoji="🛡️", value="aventureros"),
-            discord.SelectOption(label="Clasificación: Dungeon Masters", description="Top 10 narradores por campaigns dirigidas.", emoji="🎲", value="dms")
+            discord.SelectOption(label="Clasificación: Guerreros de Midgard", description="Top 10 héroes del reino por nivel de personaje.", emoji="🛡️", value="aventureros"),
+            discord.SelectOption(label="Clasificación: Skalds", description="Top 10 narradores por campaigns dirigidas.", emoji="🎲", value="dms")
         ]
         super().__init__(placeholder="Elige la pestaña del Salón de la Fama...", min_values=1, max_values=1, options=options)
 
@@ -22,7 +22,7 @@ class SelectLadder(discord.ui.Select):
         embed_actualizado = discord.Embed(color=discord.Color.gold())
         
         if self.values[0] == "aventureros":
-            embed_actualizado.title = "🏆 SALÓN DE LA FAMA: CLASIFICACIÓN DE AVENTUREROS"
+            embed_actualizado.title = "🏆 SALÓN DE LA FAMA: CLASIFICACIÓN DE GUERREROS"
             embed_actualizado.description = "Matrícula oficial de los 10 personajes con mayor progresión en campaña:\n\n"
             datos = await database.obtener_ladder_aventureros()
             if not datos:
@@ -31,11 +31,11 @@ class SelectLadder(discord.ui.Select):
                 for i, (uid, name, nivel, sesiones) in enumerate(datos, 1):
                     embed_actualizado.description += f"**#{i}** | <@{uid}> (`{name}`) — **Nivel {nivel}** ({sesiones} misiones cumplidas)\n"
         else:
-            embed_actualizado.title = "🔮 CONCILIO DE NARRADORES: CLASIFICACIÓN DE DUNGEON MASTERS"
+            embed_actualizado.title = "🔮 CONCILIO DE NARRADORES: CLASIFICACIÓN DE SKALDS"
             embed_actualizado.description = "Registro maestro de los 10 directores con mayor volumen de arbitraje:\n\n"
             datos = await database.obtener_ladder_dms()
             if not datos:
-                embed_actualizado.description += "*No se registran Dungeon Masters en el registro operativo.*"
+                embed_actualizado.description += "*No se registran Skalds en el registro operativo.*"
             else:
                 for i, (nombre, licencia, partidas, aprobacion) in enumerate(datos, 1):
                     embed_actualizado.description += f"**#{i}** | **{nombre}** [{licencia}] — **{partidas} sesiones** (👍 {aprobacion}% aprobación real)\n"
@@ -179,7 +179,7 @@ class AdmisionCog(commands.Cog):
         if int(config.ROL_AVENTURERO) in [r.id for r in usuario.roles] or ficha_existente:
             embed = discord.Embed(
                 title="❌ ERROR: JUGADOR YA REGISTRADO",
-                description=f"El aventurero {usuario.mention} **YA** tiene un personaje activo o el rol de Aventurero asignado.",
+                description=f"El guerrero {usuario.mention} **YA** tiene un personaje activo o el rol de Guerrero asignado.",
                 color=discord.Color.red()
             )
             await ctx.respond(embed=embed)
@@ -263,8 +263,8 @@ class AdmisionCog(commands.Cog):
         await message.channel.send(embed=embed_review, view=view)
 
 
-    @commands.slash_command(name="eliminar_ficha", description="[MANAGEMENT] Purga el personaje de un Aventurero.")
-    async def eliminar_ficha(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Aventurero al cual borrarle la ficha")):
+    @commands.slash_command(name="eliminar_ficha", description="[MANAGEMENT] Purga el personaje de un Guerrero.")
+    async def eliminar_ficha(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Guerrero al cual borrarle la ficha")):
         if not any(rol.id in config.ROLES_CLAUSURA for rol in ctx.user.roles):
             await ctx.respond("❌ Exclusivo para la alta gerencia (Supervisores o Jefes Gremiales).", ephemeral=True)
             return
@@ -278,8 +278,8 @@ class AdmisionCog(commands.Cog):
         else:
             await ctx.respond(f"❌ Error: El usuario no posee ninguna ficha registrada.", ephemeral=True)
 
-    @commands.slash_command(name="subir_nivel", description="[STAFF] Incrementa el nivel oficial de un Aventurero del Gremio.")
-    async def subir_nivel(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Selecciona al Aventurero"), modificador: int):
+    @commands.slash_command(name="subir_nivel", description="[STAFF] Incrementa el nivel oficial de un Guerrero de Midgard.")
+    async def subir_nivel(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Selecciona al Guerrero"), modificador: int):
         if not any(rol.id in config.ROLES_EDICION_MATRICULA for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado.**", ephemeral=True)
             return
@@ -293,7 +293,7 @@ class AdmisionCog(commands.Cog):
         await ctx.respond(f"📈 Nivel de {usuario.mention} actualizado a {nuevo}.")
 
     @commands.slash_command(name="set_nivel", description="[STAFF] Sobreescribe y fija el nivel exacto.")
-    async def set_nivel(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Aventurero"), nivel_fijo: int):
+    async def set_nivel(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Guerrero"), nivel_fijo: int):
         if not any(rol.id in config.ROLES_EDICION_MATRICULA for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado.**", ephemeral=True)
             return
@@ -301,7 +301,7 @@ class AdmisionCog(commands.Cog):
         await ctx.respond(f"🔧 Nivel fijado en {nivel_fijo} para {usuario.mention}.")
 
     @commands.slash_command(name="editar_ficha", description="[HIGH STAFF] Modifica datos biográficos.")
-    async def editar_ficha(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Aventurero")):
+    async def editar_ficha(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Guerrero")):
         if not any(rol.id in config.ROLES_EDICION_MATRICULA for rol in ctx.user.roles):
             await ctx.respond("❌ **Acceso Denegado.**", ephemeral=True)
             return
@@ -311,12 +311,12 @@ class AdmisionCog(commands.Cog):
             return
         await ctx.send_modal(ModalEditarFicha(usuario, ficha))
 
-    @commands.slash_command(name="perfil_dm", description="[PRIVATE] Muestra la acreditación, reputación y volumen de arbitraje de un DM.")
-    async def perfil_dm(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Selecciona al DM a consultar", default=None)):
+    @commands.slash_command(name="perfil_dm", description="[PRIVATE] Muestra la acreditación, reputación y volumen de arbitraje de un Skald.")
+    async def perfil_dm(self, ctx: discord.ApplicationContext, usuario: discord.Option(discord.Member, "Selecciona al Skald a consultar", default=None)):
         target_user = usuario or ctx.user
         perfil = await database.obtener_perfil_dm(target_user.id)
         if not perfil:
-            await ctx.respond(f"❌ El usuario {target_user.mention} no registra una matrícula de Dungeon Master activa en el sistema.", ephemeral=True)
+            await ctx.respond(f"❌ El usuario {target_user.mention} no registra una matrícula de Skald activa en el sistema.", ephemeral=True)
             return
 
         licencia = perfil["licencia"].upper()
@@ -331,11 +331,11 @@ class AdmisionCog(commands.Cog):
         elif perfil["aprobacion"] < 50: estatus = "⚠️ Alerta / Revisión Inmediata de Licencia"
 
         embed = discord.Embed(
-            title="🛡️ GREMIO DE AVENTUREROS - CERTIFICACIÓN OFICIAL",
+            title="🛡️ GREMIO DE GUERREROS - CERTIFICACIÓN OFICIAL",
             description=f"Documento Maestro expedido de forma privada para validar las facultades de arbitraje de la autoridad gremial.",
             color=discord.Color.dark_purple()
         )
-        embed.add_field(name="👤 Dungeon Master", value=target_user.mention, inline=True)
+        embed.add_field(name="👤 Skald", value=target_user.mention, inline=True)
         embed.add_field(name="🎖️ Rango de Licencia", value=f"`{perfil['licencia']}`", inline=True)
         embed.add_field(name="📜 Registro de Campañas", value=f"├ 🎲 **Narradas:** `{perfil['partidas']} sesiones`\n└ 🎭 **Límite:** `{restriccion}`", inline=False)
         embed.add_field(name="⚖️ Reputación del Concilio", value=f"├ ⭐ **Aprobación:** `{perfil['aprobacion']}%` *(Votos válidos: {perfil['total_validas']})*\n└ 💬 **Estatus:** `{estatus}`", inline=False)
@@ -351,10 +351,10 @@ class AdmisionCog(commands.Cog):
 
         embed = discord.Embed(
             title="🏆 SALÓN DE LA FAMA - TABLAS DE CLASIFICACIÓN",
-            description="Utiliza el menú desplegable de abajo para navegar de forma dinámica entre las estadísticas de los Aventureros más condecorados y los Dungeon Masters con mayor trayectoria del reino.",
+            description="Utiliza el menú desplegable de abajo para navegar de forma dinámica entre las estadísticas de los Guerreros más condecorados y los Skalds con mayor trayectoria del reino.",
             color=discord.Color.gold()
         )
-        embed.set_footer(text="Gremio de Aventureros - Sistema de Clasificación Fijo")
+        embed.set_footer(text="Gremio de Guerreros - Sistema de Clasificación Fijo")
         
         await ctx.send(embed=embed, view=LadderView())
         await ctx.respond("✅ El panel dinámico del Ladder ha sido inicializado con éxito.", ephemeral=True)
@@ -381,7 +381,7 @@ class AdmisionCog(commands.Cog):
         # Solo lo guardamos si el usuario ya existe en "aventureros" para no romper Foreign Keys.
         ficha_existente = await database.obtener_personaje(target_user.id)
         if not ficha_existente:
-             await ctx.followup.send(f"⚠️ El usuario {target_user.mention} no está registrado como Aventurero en la base de datos central. ¡No se pudo guardar la sincronización! Deberían pasar por el ticket primero.")
+             await ctx.followup.send(f"⚠️ El usuario {target_user.mention} no está registrado como Guerrero en la base de datos central. ¡No se pudo guardar la sincronización! Deberían pasar por el ticket primero.")
              return
 
         await database.guardar_datos_ficha_nivel20(target_user.id, datos_extraidos)
@@ -426,8 +426,8 @@ class AdmisionCog(commands.Cog):
             return
             
         from cogs.tickets import TicketBotonera
-        embed = discord.Embed(title="📜 REGISTRO DE NUEVOS AVENTUREROS", description="Presiona el botón de abajo para abrir un canal privado de revisión e iniciar la validación de tu ficha de personaje.", color=discord.Color.blue())
-        embed.set_footer(text="Gremio de Aventureros - Sistema de Admisiones")
+        embed = discord.Embed(title="📜 REGISTRO DE NUEVOS GUERREROS", description="Presiona el botón de abajo para abrir un canal privado de revisión e iniciar la validación de tu ficha de personaje.", color=discord.Color.blue())
+        embed.set_footer(text="Gremio de Guerreros - Sistema de Admisiones")
         await ctx.send(embed=embed, view=TicketBotonera())
         await ctx.respond("✅ Panel de admisión desplegado con éxito.", ephemeral=True)
 

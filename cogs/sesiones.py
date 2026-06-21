@@ -60,7 +60,7 @@ async def enviar_encuesta_individual(miembro, dm, aventura):
 
     embed = discord.Embed(
         title="Evaluación de Sesión",
-        description=f"👋 Saludos Aventurero. El **DM {dm.name}** acaba de registrar la sesión **'{aventura}'** en el Gremio.\n"
+        description=f"👋 Saludos Guerrero. El **Skald {dm.name}** acaba de registrar la sesión **'{aventura}'** en el Gremio.\n"
                     f"Para ayudarnos a monitorear la calidad del juego, califica el desempeño de tu mesa:",
         color=discord.Color.blue()
     )
@@ -80,7 +80,7 @@ class ModalRecompensasGlobales(discord.ui.Modal):
         self.add_item(discord.ui.InputText(label="Aventura / Crónica Breve", placeholder="El asalto a la fortaleza...", required=True))
         self.add_item(discord.ui.InputText(label="PC Totales a repartir por jugador", placeholder="Ej: 50000", required=True))
         self.add_item(discord.ui.InputText(label="ID Objeto Recompensa (Opcional)", placeholder="Ej: pocion_curacion", required=False))
-        self.add_item(discord.ui.InputText(label="ID Anillo Geográfico de Viaje", placeholder="Ej: 2", required=True))
+        self.add_item(discord.ui.InputText(label="Nivel Geográfico de Viaje (1: Midgard, 2: Frontera, 3: Yermos)", placeholder="Ingresa el número del nivel (ej: 1)", required=True))
 
     async def callback(self, interaction: discord.Interaction):
         interaccion_expirada = False
@@ -102,7 +102,7 @@ class ModalRecompensasGlobales(discord.ui.Modal):
         try:
             anillo_id = int(self.children[3].value.strip())
         except ValueError:
-            await interaction.followup.send("❌ El ID del Anillo Geográfico debe ser un número entero válido.", ephemeral=True)
+            await interaction.followup.send("❌ El ID del Nivel Geográfico debe ser un número entero válido.", ephemeral=True)
             return
 
         obj_norm = None
@@ -145,12 +145,14 @@ class ModalRecompensasGlobales(discord.ui.Modal):
         menciones_texto = [j.mention for j in self.jugadores]
 
         embed_auditoria = discord.Embed(title=f"🗃️ AUDITORÍA DE SESIÓN • FOLIO #{folio}", color=discord.Color.gold())
-        embed_auditoria.add_field(name="👑 Dungeon Master", value=interaction.user.mention, inline=True)
+        embed_auditoria.add_field(name="👑 Skald", value=interaction.user.mention, inline=True)
         embed_auditoria.add_field(name="⚔️ Aventura", value=aventura, inline=True)
-        embed_auditoria.add_field(name="💍 Anillo de Viaje", value=f"ID: {anillo_id}", inline=True)
+        nivel_geo_str = f"Nivel I: Midgard" if anillo_id == 1 else f"Nivel II: La Frontera" if anillo_id == 2 else f"Nivel III: Los Yermos del Fin" if anillo_id == 3 else f"ID: {anillo_id}"
+        embed_auditoria.add_field(name="💍 Nivel de Viaje", value=nivel_geo_str, inline=True)
         embed_auditoria.add_field(name="👥 Jugadores En la Mesa", value=", ".join(menciones_texto), inline=False)
         embed_auditoria.add_field(name="💰 PC Otorgados", value=f"{pc_totales} a c/u", inline=True)
         embed_auditoria.add_field(name="🛡️ Fallaron Salvación", value=str(sum(1 for v in self.salvaciones.values() if not v)), inline=True)
+        embed_auditoria.add_field(name="🔥 Tasa del Lacre (20%)", value="*El oro recaudado se funde directamente para nutrir y refrigerar las **Raíces de Yggdrasil** en el subsuelo de la capital, evitando así el advenimiento del Fimbulwinter.*", inline=False)
 
         auditoria_exitosa = False
         if canal_auditoria:
@@ -248,11 +250,11 @@ class SesionesCog(commands.Cog):
     @commands.slash_command(name="reportar_sesion", description="[DM] Despliega el flujo oficial para asentar los datos de tu última partida.")
     async def reportar_sesion(self, ctx: discord.ApplicationContext):
         if not any(rol.id == config.ROL_DUNGEON_MASTER for rol in ctx.user.roles):
-            await ctx.respond("❌ Solo los miembros con el rol oficial de Dungeon Master pueden firmar actas de sesión.", ephemeral=True)
+            await ctx.respond("❌ Solo los miembros con el rol oficial de Skald pueden firmar actas de sesión.", ephemeral=True)
             return
         await ctx.respond("**Paso 1:** Selecciona los miembros de Discord que participaron en la sesión.", view=VistaSeleccionJugadores(), ephemeral=True)
 
-    @commands.slash_command(name="auditar_dm", description="[STAFF] Extrae el análisis estadístico del Score Neto de un Dungeon Master.")
+    @commands.slash_command(name="auditar_dm", description="[STAFF] Extrae el análisis estadístico del Score Neto de un Skald.")
     async def auditar_dm(self, ctx: discord.ApplicationContext, dm_usuario: discord.Member):
         if not any(rol.id in config.ROLES_CLAUSURA for rol in ctx.user.roles):
             await ctx.respond("❌ Comando exclusivo para el alto mando de la Directiva.", ephemeral=True)
@@ -270,7 +272,7 @@ class SesionesCog(commands.Cog):
         embed.add_field(name="📈 Índice de Aprobación", value=f"**{dm_perfil['aprobacion']:.1f}%**", inline=True)
 
         if dm_perfil["aprobacion"] >= 75.0:
-            embed.description = "💡 **Dictamen del Sistema:** Salud de mesa óptima. El DM cuenta con aprobación mayoritaria."
+            embed.description = "💡 **Dictamen del Sistema:** Salud de mesa óptima. El Skald cuenta con aprobación mayoritaria."
         else:
             embed.description = "⚠️ **Dictamen del Sistema:** Alerta de calidad. El índice de aprobación está por debajo del estándar."
 
