@@ -12,12 +12,12 @@ ROL_VIAJERO = 1509955739953922138
 ROL_AVENTURERO = 1509955646492250122
 ROL_DUNGEON_MASTER = 1509955549297381469
 
-# --- NUEVOS RANGOS DE LICENCIA DE DUNGEON MASTERS ---
+# --- NUEVOS RANGOS DE LICENCIA DE SKALDS ---
 ROL_DM_APRENDIZ = 1511094617230151973
 ROL_DM_EXPERTO = 1511094678064206067
 ROL_DM_OFICIAL = 1511094806229684314
 
-# --- NUEVOS TIERS DE NIVEL DE JUGADORES / AVENTUREROS ---
+# --- NUEVOS TIERS DE NIVEL DE JUGADORES / GUERREROS ---
 ROL_TIER_APRENDIZ = 1511093704658784448
 ROL_TIER_AVENTURERO = 1511093928001273896
 ROL_TIER_VETERANO = 1511094122822504489
@@ -83,7 +83,7 @@ ROL_PATROCINADOR = 1512293128986689606
 # REQUISITO OBLIGATORIO PARA EL FUNCIONAMIENTO EN VIVO DE COGS/PERSONAL.PY
 CONFIG_RAMAS = {
     "gremio": {
-        "titulo": "🏛️ CONCILIO DE TRABAJADORES GREMIALES",
+        "titulo": "🏛️ ASAMBLEA CENTRAL DE ARTESANOS",
         "jefe_id": 1509954655470485645,  # ID Rol Jefe Gremial
         "color": 0x3498db,               # Azul
         "rangos": {
@@ -95,7 +95,7 @@ CONFIG_RAMAS = {
         }
     },
     "guardias": {
-        "titulo": "🛡️ CUERPO DE GUARDIAS Y SEGURIDAD",
+        "titulo": "⚔️ DEFENSORES DE BIFRÖST Y SEGURIDAD",
         "jefe_id": 1510094198005694594,  # ID Rol Jefe de Guardias
         "color": 0xe74c3c,               # Rojo
         "rangos": {
@@ -105,7 +105,7 @@ CONFIG_RAMAS = {
         }
     },
     "world_building": {
-        "titulo": "🔮 CARTÓGRAFOS Y ARQUITECTOS DE WORLD BUILDING",
+        "titulo": "🔮 ESCRIBAS DE YGGDRASIL Y WORLD BUILDING",
         "jefe_id": 1509954294307098697,  # ID Rol Jefe de World Building
         "color": 0x9b59b6,               # Púrpura
         "rangos": {
@@ -116,7 +116,7 @@ CONFIG_RAMAS = {
         }
     },
     "noticias": {
-        "titulo": "📰 CRÓNICAS DEL REINO, PRENSA Y NOTICIAS",
+        "titulo": "📰 CRÓNICAS DE MIDGARD Y NOTICIAS",
         "jefe_id": 1509954568098938951,  # ID Rol Jefe de Noticias
         "color": 0xf1c40f,               # Amarillo
         "rangos": {

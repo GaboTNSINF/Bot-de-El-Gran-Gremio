@@ -9,27 +9,27 @@ import re
 from itertools import combinations
 
 class SelectorRolHibrido(discord.ui.View):
-    """Aparece por DM solo si el usuario posee simultáneamente los roles de Aventurero y DM."""
+    """Aparece por DM solo si el usuario posee simultáneamente los roles de Guerrero y Skald."""
     def __init__(self, cog, miembro):
         super().__init__(timeout=180)
         self.cog = cog
         self.miembro = miembro
 
-    @discord.ui.button(label="⚔️ Buscar como Aventurero", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="⚔️ Buscar como Guerrero", style=discord.ButtonStyle.primary)
     async def como_jugador(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await interaction.response.send_message("Has seleccionado la cola de **Aventureros**. Iniciando asistente...", ephemeral=True)
+        await interaction.response.send_message("Has seleccionado la cola de **Guerreros**. Iniciando asistente...", ephemeral=True)
         self.stop()
         await self.cog.iniciar_asistente_config(interaction.user, self.miembro, "jugador")
 
-    @discord.ui.button(label="📜 Buscar como Dungeon Master", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="📜 Buscar como Skald", style=discord.ButtonStyle.success)
     async def como_dm(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await interaction.response.send_message("Has seleccionado la cola de **Dungeon Masters**. Iniciando asistente...", ephemeral=True)
+        await interaction.response.send_message("Has seleccionado la cola de **Skalds**. Iniciando asistente...", ephemeral=True)
         self.stop()
         await self.cog.iniciar_asistente_config(interaction.user, self.miembro, "dm")
 
 
 class FormularioHorarioModal(discord.ui.Modal):
-    """Formulario interactivo para procesar horas libres y quórum del DM mediante análisis sintáctico."""
+    """Formulario interactivo para procesar horas libres y quórum del Skald mediante análisis sintáctico."""
     def __init__(self, cog, miembro, rol_busqueda, zona_horaria, nivel_usuario):
         super().__init__(title="⏰ Configura tu Rango de Tiempo")
         self.cog = cog
@@ -165,7 +165,7 @@ class MatchmakingCog(commands.Cog):
         tiene_dm = any(rol.id == config.ROL_DUNGEON_MASTER for rol in miembro.roles)
 
         if not tiene_aventurero and not tiene_dm:
-            await ctx.respond("❌ Debes poseer el rol de Aventurero o Dungeon Master para acceder al emparejamiento.", ephemeral=True)
+            await ctx.respond("❌ Debes poseer el rol de Guerrero o Skald para acceder al emparejamiento.", ephemeral=True)
             return
 
         await ctx.respond("📬 He abierto un asistente de configuración en tus Mensajes Directos (DM).", ephemeral=True)
@@ -273,15 +273,15 @@ class MatchmakingCog(commands.Cog):
                         overwrites[rol] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
 
                 nuevo_canal = await guild.create_text_channel(
-                    name=f"⚔-mesa-dm-{dm_user.name.lower() if dm_user else 'anon'}"[:100],
+                    name=f"⚔-mesa-skald-{dm_user.name.lower() if dm_user else 'anon'}"[:100],
                     category=categoria,
                     overwrites=overwrites
                 )
 
                 mensaje = (
                     f"⚔️ **¡MESA GREMIAL CONSOLIDADA EXITOSAMENTE!**\n\n"
-                    f"**Dungeon Master Asignado:** <@{dm_id}>\n"
-                    f"**Aventureros Confirmados ({len(grupo_final_ids)}/{quorum_objetivo}):**\n"
+                    f"**Skald Asignado:** <@{dm_id}>\n"
+                    f"**Guerreros Confirmados ({len(grupo_final_ids)}/{quorum_objetivo}):**\n"
                     f"• " + "\n• ".join(detalles_niveles) + "\n\n"
                     rf"⚙️ *Nota de Balance:* El grupo cumple con la tolerancia de niveles móviles (2) \n"
                     f"Mención de control: <@&{config.ROLES_CLAUSURA[0]}>."

@@ -58,8 +58,8 @@ class EconomiaCog(commands.Cog):
         
         await ctx.followup.send(embed=embed, ephemeral=True)
 
-    @commands.slash_command(name="dinero", description="Muestra tu estado de cuenta corriente o el de otro Aventurero.")
-    async def dinero(self, ctx: discord.ApplicationContext, aventurero: discord.Option(discord.Member, "Selecciona al Aventurero", default=None)):
+    @commands.slash_command(name="dinero", description="Muestra tu estado de cuenta corriente o el de otro Guerrero.")
+    async def dinero(self, ctx: discord.ApplicationContext, aventurero: discord.Option(discord.Member, "Selecciona al Guerrero", default=None)):
         target = aventurero or ctx.user
         if target.bot:
             await ctx.respond("❌ **Error Analítico:** Los bots carecen de estado financiero.", ephemeral=True)
@@ -151,7 +151,7 @@ class EconomiaCog(commands.Cog):
     async def banco_emitir(
         self,
         ctx: discord.ApplicationContext,
-        usuario: discord.Option(discord.Member, "Aventurero receptor de los fondos"),
+        usuario: discord.Option(discord.Member, "Guerrero receptor de los fondos"),
         moneda: discord.Option(str, "Tipo de divisa a otorgar", choices=[
             discord.OptionChoice("🪙 Platino (pp)", "platino"),
             discord.OptionChoice("🥇 Oro (po)", "oro"),
@@ -239,11 +239,11 @@ class EconomiaCog(commands.Cog):
         if canal_logs:
             await canal_logs.send(embed=embed)
 
-    @commands.slash_command(name="pagar", description="Transfiere monedas hacia otro Aventurero o la Tienda.")
+    @commands.slash_command(name="pagar", description="Transfiere monedas hacia otro Guerrero o la Tienda.")
     async def pagar(
         self,
         ctx: discord.ApplicationContext,
-        usuario: discord.Option(discord.Member, "Selecciona al Aventurero o al Bot del Gremio"),
+        usuario: discord.Option(discord.Member, "Selecciona al Guerrero o al Bot del Gremio"),
         moneda: discord.Option(str, "Tipo de divisa a transferir", choices=[
             discord.OptionChoice("🪙 Platino (pp)", "platino"),
             discord.OptionChoice("🥇 Oro (po)", "oro"),

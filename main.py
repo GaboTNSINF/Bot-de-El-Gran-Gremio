@@ -65,7 +65,7 @@ class GremioBot(discord.Bot):
     async def on_ready(self):
         """Evento que se ejecuta cuando el bot se conecta a Discord exitosamente."""
         print(f"==========================================")
-        print(f"🤖 BOT DEL GREMIO ACTIVADO EN PRODUCCIÓN")
+        print(f"🤖 PROYECTO MÍMIR 2.1 ACTIVADO EN PRODUCCIÓN")
         print(f"👤 Conectado como: {self.user.name} ({self.user.id})")
         print(f"==========================================")
 

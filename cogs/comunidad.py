@@ -9,24 +9,24 @@ class ComunidadCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(name="perfil", description="Muestra la matrícula y ficha oficial de un Aventurero del Gremio.")
+    @commands.slash_command(name="perfil", description="Muestra la matrícula y ficha oficial de un Guerrero del Gremio.")
     async def perfil(
         self, 
         ctx: discord.ApplicationContext, 
-        aventurero: discord.Option(discord.Member, "Selecciona al Aventurero", default=None)
+        aventurero: discord.Option(discord.Member, "Selecciona al Guerrero", default=None)
     ):
         target = aventurero or ctx.user
 
-        # 1. Validar la existencia del rol de Aventurero oficial en el servidor
+        # 1. Validar la existencia del rol de Guerrero oficial en el servidor
         rol_aventurero = ctx.guild.get_role(config.ROL_AVENTURERO)
         if not rol_aventurero or rol_aventurero not in target.roles:
-            await ctx.respond(f"❌ {target.mention} no posee el rol de Aventurero oficial del Gremio.", ephemeral=True)
+            await ctx.respond(f"❌ {target.mention} no posee el rol de Guerrero oficial del Gremio.", ephemeral=True)
             return
 
         # 2. Consulta al pool persistente de la base de datos
         ficha = await database.obtener_personaje(target.id)
         if not ficha:
-            await ctx.respond(f"⚠️ El usuario {target.mention} tiene el rol de Aventurero, pero no se encontró un registro inyectado en la matrícula. Contacta a alguien del Gremio.", ephemeral=True)
+            await ctx.respond(f"⚠️ El usuario {target.mention} tiene el rol de Guerrero, pero no se encontró un registro inyectado en la matrícula. Contacta a alguien del Gremio.", ephemeral=True)
             return
 
         # 3. ADAPTACIÓN SENIOR: Acceso semántico seguro mediante las llaves del diccionario de la base de datos
@@ -42,7 +42,7 @@ class ComunidadCog(commands.Cog):
         # 4. Sanitización estética en caliente para el renderizado del Embed institucional
         embed = discord.Embed(
             title=f"📜 MATRÍCULA OFICIAL: {name.upper()}",
-            description=f"Registro inmutable del Aventurero vinculado a la cuenta de {target.mention}.",
+            description=f"Registro inmutable del Guerrero vinculado a la cuenta de {target.mention}.",
             color=discord.Color.dark_gold()
         )
         
@@ -57,7 +57,7 @@ class ComunidadCog(commands.Cog):
         embed.add_field(name="📏 Estatura", value=height, inline=True)
         embed.add_field(name="🔗 Hoja de Personaje", value=f"[Enlace a Nivel20]({link})", inline=False)
         
-        embed.set_footer(text="Gremio de Aventureros • Datos Protegidos e Inmutables")
+        embed.set_footer(text="Gremio de Guerreros • Datos Protegidos e Inmutables")
 
         view = None
 
@@ -113,7 +113,7 @@ class ComunidadCog(commands.Cog):
 
         await ctx.respond(embed=embed, view=view)
 
-    @commands.slash_command(name="inventario", description="Abre tu inventario de objetos adquiridos o el de otro aventurero si eres administrador.")
+    @commands.slash_command(name="inventario", description="Abre tu inventario de objetos adquiridos o el de otro guerrero si eres administrador.")
     async def inventario(self, ctx: discord.ApplicationContext, aventurero: discord.Option(discord.Member, "Revisar el inventario de (Solo Alta Dirección)", default=None)):
         target = aventurero or ctx.user
 
@@ -127,7 +127,7 @@ class ComunidadCog(commands.Cog):
 
         tiene_permiso = ctx.user.id == target.id or any(rol.id in ROLES_PERMITIDOS_INVENTARIO for rol in ctx.user.roles)
         if not tiene_permiso:
-            await ctx.respond("❌ **Acceso Denegado:** No tienes permiso para revisar el inventario de otros aventureros.", ephemeral=True)
+            await ctx.respond("❌ **Acceso Denegado:** No tienes permiso para revisar el inventario de otros guerreros.", ephemeral=True)
             return
 
         await ctx.response.defer(ephemeral=True)
@@ -185,7 +185,7 @@ class SelectUsoInventario(discord.ui.Select):
 
             # para que los demás jugadores sepan que usó una poción o ración.
             try:
-                await interaction.channel.send(f"🎒 El aventurero **{self.nombre_pj}** ha utilizado un objeto: `{objeto_elegido}`.")
+                await interaction.channel.send(f"🎒 El guerrero **{self.nombre_pj}** ha utilizado un objeto: `{objeto_elegido}`.")
             except discord.Forbidden:
                 pass # Si el bot no tiene permisos de escritura, no hace nada
         else:

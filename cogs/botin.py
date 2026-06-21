@@ -5,11 +5,11 @@ from discord.ext import commands
 import random
 
 class BotinCog(commands.Cog):
-    """Generador de botín aleatorio para facilitar el rol del Dungeon Master."""
+    """Generador de botín aleatorio para facilitar el rol del Skald."""
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(name="generar_botin", description="[DM] Genera una tabla de botín aleatoria basada en la dificultad del encuentro.")
+    @commands.slash_command(name="generar_botin", description="[Skald] Genera una tabla de botín aleatoria basada en la dificultad del encuentro.")
     async def generar_botin(
         self,
         ctx: discord.ApplicationContext,
@@ -40,15 +40,15 @@ class BotinCog(commands.Cog):
             monedas_texto = f"{random.randint(100, 400)} Oro (po) y {random.randint(10, 50)} Platino (pp)"
             color_embed = discord.Color.blue()
             if random.randint(1, 100) <= 40:
-                items_especiales.append("💎 Gema Preciosa (Valor: 500 po)")
+                items_especiales.append("💎 Lágrima de Yggdrasil (Valor: 500 po)")
             if random.randint(1, 100) <= 20:
                 items_especiales.append("🗡️ Arma Mágica Poco Común (+1)")
 
         else: # Jefe Épico
             monedas_texto = f"{random.randint(1000, 3000)} Oro (po) y {random.randint(100, 500)} Platino (pp)"
             color_embed = discord.Color.gold()
-            items_especiales.append("💎 3x Gemas Perfectas (Valor total: 3,000 po)")
-            items_especiales.append("🛡️ Objeto Mágico Raro o Muy Raro (A elección del DM)")
+            items_especiales.append("💎 3x Lágrimas de Yggdrasil (Valor total: 3,000 po)")
+            items_especiales.append("🛡️ Objeto Mágico Raro o Muy Raro (A elección del Skald)")
             if random.randint(1, 100) <= 50:
                 items_especiales.append("👑 Artefacto de Historia (Legendario)")
 
@@ -65,7 +65,7 @@ class BotinCog(commands.Cog):
         else:
             embed.add_field(name="✨ Objetos de Interés", value="*Solo chatarra y huesos rotos.*", inline=False)
 
-        embed.set_footer(text="Generador de Loot Gremial para DMs")
+        embed.set_footer(text="Generador de Loot Gremial para Skalds")
         # Mandamos el loot de forma pública para que la mesa entera celebre
         await ctx.respond(embed=embed)
 

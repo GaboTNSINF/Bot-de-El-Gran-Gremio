@@ -30,12 +30,12 @@ class SeguridadCog(commands.Cog):
             pass
 
         # 2. INTENTO DE GUILLOTINA TOTAL (PROTOCOLO ANTI-HACKEO)
-        razon_destierro = "ACTIVACIÓN DE TRAMPA RÚNICA: Cuenta comprometida o intrusa en canal prohibido."
+        razon_destierro = "🪓 [Ginnungagap] Intruso desterrado fulminantemente por violar el vacío ancestral"
         
         try:
             # El bot lanza el kick a matar. Si la cuenta es del Staff o Co-Fundadores inferiores al bot, caerán.
             await guild.kick(usuario, reason=razon_destierro)
-            print(f"🪓 [DESTIERRO] {usuario.name} ({usuario.id}) ha sido expulsado fulminantemente por seguridad del ecosistema.")
+            print(f"🪓 [Ginnungagap] Intruso desterrado fulminantemente por violar el vacío ancestral")
             
         except discord.Forbidden:
             # 3. PROTOCOLO DE CONTENCIÓN ANTE FALLO DE JERARQUÍA (Dueño o Rango Superior)
